@@ -1,6 +1,6 @@
 # exp setting
 ckpt_path: null # checkpoint path, used for evaluation
-save_checkpoint: False # whether to save training checkpoints
+save_checkpoint: True # TESIS: era False; sin esto no hay checkpoints ni resume
 seed: 42 # random seed
 devices: [ 0, 1, 2, 3 ] # gpu ids
 eval: False

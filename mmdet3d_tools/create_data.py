@@ -126,7 +126,18 @@ if __name__ == '__main__':
     from mmengine.registry import init_default_scope
     init_default_scope('mmdet3d')
     
-    if args.dataset == 'nuscenes' and args.version != 'v1.0-mini':
+    # TESIS: el script publicado no contempla el mini: con `version == v1.0-mini`
+    # la condicion de abajo es falsa y cae al else, que lanza NotImplementedError.
+    # El mini es el unico camino para medir sin bajar los ~400 GB del trainval.
+    if args.dataset == 'nuscenes' and args.version == 'v1.0-mini':
+        nuscenes_data_prep(
+            root_path=args.root_path,
+            info_prefix=args.extra_tag,
+            version='v1.0-mini',
+            dataset_name='NuScenesDataset',
+            out_dir=args.out_dir,
+            max_sweeps=args.max_sweeps)
+    elif args.dataset == 'nuscenes' and args.version != 'v1.0-mini':
         train_version = f'{args.version}-trainval'
         nuscenes_data_prep(
             root_path=args.root_path,

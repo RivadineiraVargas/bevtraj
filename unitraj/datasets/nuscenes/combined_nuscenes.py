@@ -75,9 +75,15 @@ class CombinedNuScenes(Dataset):
 
         data_samples_list = [sensor_data["data_samples"] for sensor_data in sensor_batch_list]
         points_list = [sensor_data['inputs']["points"] for sensor_data in sensor_batch_list]
-        img_list = [sensor_data['inputs']["img"] for sensor_data in sensor_batch_list]
 
-        batched_img = torch.stack(img_list, dim=0)
+        # TESIS: la configuracion solo-LiDAR no carga imagenes, asi que 'img' no
+        # existe en el pipeline. BEVFusion.extract_feat ya acepta imgs=None y salta
+        # la rama de camara; el unico punto que lo asumia obligatorio era este.
+        if "img" in sensor_batch_list[0]['inputs']:
+            batched_img = torch.stack(
+                [sensor_data['inputs']["img"] for sensor_data in sensor_batch_list], dim=0)
+        else:
+            batched_img = None
 
         batch_input_dict = {"points": points_list, "imgs": batched_img}
         sensor_batch_dict = {'data_samples': data_samples_list, 'batch_input_dict': batch_input_dict}

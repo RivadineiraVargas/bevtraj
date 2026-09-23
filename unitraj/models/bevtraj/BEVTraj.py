@@ -44,7 +44,18 @@ class BEVTraj(BaseModel):
                 nn.ReLU()
             ) if dec_dim != sc_feat_dim else nn.Identity()
         
-        print("BEVTraj model initialized.")
+        # TESIS: el exp. 18 del proyecto MOTF se invalido por optimizar pesos
+        # pre-entrenados a la LR del decoder. Aca se declara explicitamente.
+        self.freeze_sensor_encoder = self.config.get('freeze_sensor_encoder', False)
+        self.sensor_encoder_lr_mult = self.config.get('sensor_encoder_lr_mult', 1.0)
+        if self.freeze_sensor_encoder:
+            for p_ in self.sensor_encoder.parameters():
+                p_.requires_grad = False
+        n_enc = sum(p_.numel() for p_ in self.sensor_encoder.parameters())
+        n_enc_train = sum(p_.numel() for p_ in self.sensor_encoder.parameters() if p_.requires_grad)
+        print(f"BEVTraj model initialized. sensor_encoder: {n_enc/1e6:.2f} M params, "
+              f"{n_enc_train/1e6:.2f} M entrenables (freeze={self.freeze_sensor_encoder}, "
+              f"lr_mult={self.sensor_encoder_lr_mult})")
         
     def forward(self, batch):
         traj_data = batch['traj_data']['input_dict']
@@ -132,7 +143,24 @@ class BEVTraj(BaseModel):
         return ego_dynamics
     
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), **self.optimizer_cfg)
+        # TESIS: grupos separados. Sin esto, el encoder pre-entrenado se optimiza
+        # a la misma LR que un decoder que arranca aleatorio.
+        cfg = dict(self.optimizer_cfg)
+        base_lr = cfg.pop('lr')
+        enc_ids = {id(p_) for p_ in self.sensor_encoder.parameters()}
+        enc_params = [p_ for p_ in self.parameters() if id(p_) in enc_ids and p_.requires_grad]
+        rest_params = [p_ for p_ in self.parameters() if id(p_) not in enc_ids and p_.requires_grad]
+        # 'lr_scale' es lo que respeta WarmupCosLR en cada paso; sin el, el
+        # scheduler reescribe la LR de todos los grupos con el mismo valor.
+        groups = [{'params': rest_params, 'lr': base_lr, 'lr_scale': 1.0}]
+        if enc_params:
+            groups.append({'params': enc_params,
+                           'lr': base_lr * self.sensor_encoder_lr_mult,
+                           'lr_scale': self.sensor_encoder_lr_mult})
+        print(f"[optim] grupos: decoder/otros lr={base_lr} ({sum(p_.numel() for p_ in rest_params)/1e6:.2f} M) | "
+              f"sensor_encoder lr={base_lr * self.sensor_encoder_lr_mult} "
+              f"({sum(p_.numel() for p_ in enc_params)/1e6:.2f} M)")
+        optimizer = torch.optim.AdamW(groups, **cfg)
         scheduler = WarmupCosLR(optimizer, **self.scheduler_cfg)
         
         return [optimizer], [scheduler]

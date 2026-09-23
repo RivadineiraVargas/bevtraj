@@ -42,6 +42,18 @@ def train(cfg):
         )
         call_backs.append(checkpoint_callback)
 
+        # TESIS: red de seguridad por PASOS. El checkpoint de arriba solo guarda al
+        # cerrar una epoca; en esta maquina una corrida puede cortarse a mitad de
+        # epoca (degradacion de la GPU, corte de energia) y se pierde entera.
+        # `last.ckpt` se sobreescribe cada N pasos y es lo que busca el resume.
+        call_backs.append(ModelCheckpoint(
+            dirpath='ckpt/' + cfg.exp_name,
+            filename='step-{step}',
+            every_n_train_steps=cfg.method.get('ckpt_every_n_steps', 1000),
+            save_top_k=1,
+            save_last=True,
+        ))
+
     train_loader = DataLoader(
         train_set, batch_size=train_batch_size, num_workers=cfg.load_num_workers, drop_last=False,
         collate_fn=train_set.collate_fn)
@@ -59,7 +71,8 @@ def train(cfg):
         profiler="simple",
         strategy="ddp_find_unused_parameters_true",
         callbacks=call_backs,
-        check_val_every_n_epoch=1,
+        check_val_every_n_epoch=cfg.method.get('check_val_every_n_epoch', 1),
+        accumulate_grad_batches=cfg.method.get('accumulate_grad_batches', 1),
         num_sanity_val_steps=0,
         enable_checkpointing=cfg.save_checkpoint,
     )

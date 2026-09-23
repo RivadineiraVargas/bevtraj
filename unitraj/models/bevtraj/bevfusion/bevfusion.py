@@ -183,6 +183,40 @@ class BEVFusion(Base3DDetector):
         filtered_state_dict = OrderedDict(
             (k, v) for k, v in state_dict.items() if not k.startswith(exclude_prefix)
         )
+        # TESIS: strict=False descarta en silencio las claves que no coinciden. Si el
+        # checkpoint de fusion no encaja en la variante solo-LiDAR, el brazo B quedaria
+        # medio aleatorio sin que nadie se entere. Se comparan las claves a mano porque
+        # en esta jerarquia load_state_dict devuelve None (mmengine lo sobreescribe).
+        own = self.state_dict()
+        ck = filtered_state_dict
+
+        faltantes = [k for k in own if k not in ck]
+        inesperadas = [k for k in ck if k not in own]
+        # spconv 2.x convierte por si solo el layout de los pesos guardados con
+        # spconv 1.x: (kD,kH,kW,Cin,Cout) -> (Cout,kD,kH,kW,Cin). Comparar las formas
+        # crudas da 21 falsos desajustes en el backbone disperso. Se considera
+        # compatible tambien lo que coincide tras esa permutacion.
+        def _compatible(a, b):
+            if tuple(a.shape) == tuple(b.shape):
+                return True
+            return b.dim() == 5 and tuple(b.permute(4, 0, 1, 2, 3).shape) == tuple(a.shape)
+        desajuste = [k for k in own if k in ck and not _compatible(own[k], ck[k])]
+        cargadas = [k for k in own if k in ck and k not in desajuste]
+        def _n(pref, ks):
+            return sum(1 for k in ks if k.startswith(pref))
+        print(f"[load_weights] cargadas {len(cargadas)}/{len(own)} claves | "
+              f"encoders.lidar={_n('encoders.lidar', cargadas)} "
+              f"decoder={_n('decoder', cargadas)} heads={_n('heads', cargadas)}")
+        print(f"[load_weights] faltantes (quedan aleatorias): {len(faltantes)}")
+        for k in faltantes[:40]:
+            print(f"[load_weights]   FALTA {k}")
+        print(f"[load_weights] desajuste de forma: {len(desajuste)}")
+        for k in desajuste[:20]:
+            print(f"[load_weights]   FORMA {k}: modelo {tuple(own[k].shape)} vs ckpt {tuple(ck[k].shape)}")
+        print(f"[load_weights] inesperadas (sobran del ckpt): {len(inesperadas)}")
+        if desajuste:
+            for k in desajuste:
+                filtered_state_dict.pop(k)
         self.load_state_dict(filtered_state_dict, strict=False)
 
     @property

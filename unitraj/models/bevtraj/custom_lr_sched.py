@@ -6,10 +6,14 @@ class WarmupCosLR(_LRScheduler):
     def __init__(
         self, optimizer, min_lr, lr, warmup_epochs, epochs, last_epoch=-1, verbose=False
     ) -> None:
-        self.min_lr = min_lr
-        self.lr = lr
-        self.epochs = epochs
-        self.warmup_epochs = warmup_epochs
+        # TESIS: los configs publicados traen `min_lr: 1e-5`, que YAML 1.1 parsea
+        # como CADENA (exige 1.0e-5). La rama del coseno hace `self.lr - self.min_lr`
+        # y revienta con TypeError en la primera epoca posterior al warmup: con
+        # warmup_epochs=2 el entrenamiento muere en la epoca 2 de 10. Se fuerza a float.
+        self.min_lr = float(min_lr)
+        self.lr = float(lr)
+        self.epochs = int(epochs)
+        self.warmup_epochs = int(warmup_epochs)
         self.last_epoch = last_epoch
         
         if last_epoch != -1:
@@ -54,7 +58,8 @@ class WarmupCosLR(_LRScheduler):
                     / (self.epochs - self.warmup_epochs)
                 )
             )
-        if "lr_scale" in self.optimizer.param_groups[0]:
-            return [lr * group["lr_scale"] for group in self.optimizer.param_groups]
-        
-        return [lr for _ in self.optimizer.param_groups]
+        # TESIS: antes se miraba "lr_scale" SOLO en param_groups[0]; con grupos
+        # separados (encoder pre-entrenado vs decoder aleatorio) el scheduler
+        # pisaba la LR del encoder con la del decoder en cada paso. Es el mismo
+        # error que invalido el exp. 18 del proyecto MOTF.
+        return [lr * group.get("lr_scale", 1.0) for group in self.optimizer.param_groups]
