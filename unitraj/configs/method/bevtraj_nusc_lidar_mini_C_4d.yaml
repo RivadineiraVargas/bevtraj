@@ -1,6 +1,6 @@
 # experiment_name (for wandb)
 
-exp_name: &exp_name 'bevtraj_nusc_lidar_mini'
+exp_name: &exp_name 'bevtraj_nusc_lidar_mini_C_4d'
 
 # train
 
@@ -127,7 +127,7 @@ MODEL:
                 loss_type: focal
                 use_grid_transform: true
         dataset_name: *dataset_name
-        weight_path: null  # TESIS: brazo A (init aleatoria); el brazo B usa el checkpoint
+        weight_path: pretraining_ckpt/c_4d.pth  # TESIS: brazo C_4d, pre-entrenado SIN rotulos
     
     SCENE_CONTEXT_ENCODER:
         future_len: *future_len

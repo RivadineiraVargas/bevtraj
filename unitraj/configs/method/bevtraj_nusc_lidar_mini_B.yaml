@@ -35,6 +35,18 @@ MODEL:
     visualize_num: *visualize_num
     grid_size: &grid_size [51.2, 51.2]
 
+    # TESIS: la LR del encoder se DECLARA, no se hereda en silencio. Sin estas dos
+    # claves ambas valen False y 1.0, o sea que el encoder pre-entrenado se afina a la
+    # misma LR que un decoder aleatorio: el fallo del exp. 18 de MOTF, que es justo lo
+    # que el parche de BEVTraj.py existe para evitar. El protocolo exige declararla en
+    # cada tabla de resultados.
+    #   protocolo CONGELADO : freeze_sensor_encoder=true  (override por CLI)
+    #   protocolo AJUSTADO  : freeze_sensor_encoder=false + el multiplicador de abajo
+    # El valor debe ser EL MISMO en todos los brazos: si el brazo B usara 0.1 y el A
+    # 1.0, la comparacion confundiria inicializacion con horario de aprendizaje.
+    freeze_sensor_encoder: false
+    sensor_encoder_lr_mult: 1.0
+
     PRE_ENCODER:
         k_attr: 8
         d_model: 256
