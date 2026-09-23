@@ -146,7 +146,19 @@ class BEVTraj(BaseModel):
         # TESIS: grupos separados. Sin esto, el encoder pre-entrenado se optimiza
         # a la misma LR que un decoder que arranca aleatorio.
         cfg = dict(self.optimizer_cfg)
-        base_lr = cfg.pop('lr')
+        base_lr = float(cfg.pop('lr'))
+        # TESIS: OJO. WarmupCosLR reescribe la LR de TODOS los grupos en cada paso
+        # como scheduler.lr * lr_scale, asi que el 'lr' que se pone aca solo vale
+        # para el primer paso y despues se ignora: manda `scheduler.lr`. Si las dos
+        # claves del config difieren, cambiar `optimizer.lr` no tiene ningun efecto
+        # y no hay aviso. Como la tesis exige declarar la LR del encoder en cada
+        # tabla de resultados, se verifica que coincidan.
+        sched_lr = float(self.scheduler_cfg.get('lr', base_lr))
+        if abs(sched_lr - base_lr) > 1e-12:
+            raise ValueError(
+                f"optimizer.lr ({base_lr}) y scheduler.lr ({sched_lr}) difieren. "
+                f"WarmupCosLR usa el del scheduler y descarta el del optimizador: "
+                f"iguale ambos en el config para que la LR reportada sea la real.")
         enc_ids = {id(p_) for p_ in self.sensor_encoder.parameters()}
         enc_params = [p_ for p_ in self.parameters() if id(p_) in enc_ids and p_.requires_grad]
         rest_params = [p_ for p_ in self.parameters() if id(p_) not in enc_ids and p_.requires_grad]

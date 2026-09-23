@@ -77,9 +77,21 @@ def train(cfg):
         enable_checkpointing=cfg.save_checkpoint,
     )
 
-    # automatically resume training
-    if cfg.ckpt_path is None:
+    # TESIS: la reanudacion automatica pasa a ser EXPLICITA (`auto_resume: true`).
+    # Con `save_checkpoint` activado, relanzar un brazo con el mismo `exp_name`
+    # reanudaba desde `last.ckpt` en vez de empezar de cero, sin ningun aviso: una
+    # corrida con otra semilla heredaba el estado de la anterior y parecia normal.
+    # En una comparacion controlada entre brazos eso invalida el resultado en silencio.
+    if cfg.ckpt_path is None and cfg.get('auto_resume', False):
         cfg.ckpt_path = find_latest_checkpoint(os.path.join('ckpt', cfg.exp_name))
+        if cfg.ckpt_path:
+            print(f"[train] REANUDANDO desde {cfg.ckpt_path}")
+    elif cfg.ckpt_path is None:
+        previo = find_latest_checkpoint(os.path.join('ckpt', cfg.exp_name))
+        if previo:
+            print(f"[train] AVISO: existe {previo} de una corrida anterior con este "
+                  f"exp_name. NO se reanuda (auto_resume=false). Use un exp_name "
+                  f"distinto por brazo y semilla, o borre ese directorio.")
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.ckpt_path)
 
