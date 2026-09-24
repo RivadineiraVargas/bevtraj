@@ -51,12 +51,41 @@ class BEVTraj(BaseModel):
         if self.freeze_sensor_encoder:
             for p_ in self.sensor_encoder.parameters():
                 p_.requires_grad = False
+            self.sensor_encoder.eval()
         n_enc = sum(p_.numel() for p_ in self.sensor_encoder.parameters())
         n_enc_train = sum(p_.numel() for p_ in self.sensor_encoder.parameters() if p_.requires_grad)
         print(f"BEVTraj model initialized. sensor_encoder: {n_enc/1e6:.2f} M params, "
               f"{n_enc_train/1e6:.2f} M entrenables (freeze={self.freeze_sensor_encoder}, "
               f"lr_mult={self.sensor_encoder_lr_mult})")
         
+    def train(self, mode=True):
+        """TESIS: con el encoder congelado, mantenerlo en eval SIEMPRE.
+
+        `requires_grad=False` congela los pesos pero NO el BatchNorm: sus buffers no
+        son parametros. Lightning llama a `model.train()` al empezar cada epoca y eso
+        devolvia las 37 capas de BN del encoder al modo entrenamiento, donde normalizan
+        con la estadistica del lote y ademas actualizan running_mean/running_var.
+
+        MEDIDO (23/09/2026): con freeze=True y model.train(), 35 de 37 capas cambiaron
+        su running_mean tras CINCO pasadas hacia adelante, con un cambio maximo de
+        0,4231. Con el encoder en eval, cero de 37.
+
+        Rompia el protocolo congelado dos veces. Primera, las caracteristicas BEV
+        derivan entre epocas, asi que no se pueden cachear como dice el diseno. Segunda,
+        y peor: un encoder ALEATORIO (brazo A) adapta sus estadisticas a los datos
+        gratis, sin un solo gradiente, lo que le favorece y disimula la ventaja del
+        pre-entrenamiento. Es justo el tipo de sesgo silencioso que invalidaria la
+        medicion central de la tesis.
+
+        En el protocolo AJUSTADO no se toca: ahi el encoder debe entrenar. Queda dicho,
+        eso si, que `sensor_encoder_lr_mult` frena los pesos pero NO la adaptacion del
+        BatchNorm, que va a velocidad completa porque no depende de la LR.
+        """
+        super().train(mode)
+        if self.freeze_sensor_encoder:
+            self.sensor_encoder.eval()
+        return self
+
     def forward(self, batch):
         traj_data = batch['traj_data']['input_dict']
         sensor_data = batch['sensor_data']
