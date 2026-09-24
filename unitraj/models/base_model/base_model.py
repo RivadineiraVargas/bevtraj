@@ -211,6 +211,21 @@ class BaseModel(pl.LightningModule):
         minfde1 = fde[np.arange(bs), top1_indices]
         minfde10 = np.min(top10_fde, axis=-1)
 
+        # TESIS: brier-minFDE, que el esbozo pre-registra como metrica primaria junto a
+        # minFDE1 y que el repositorio publicado NO calculaba. Definicion de Argoverse:
+        # al minFDE del mejor modo se le suma (1 - p)^2, donde p es la probabilidad que
+        # el modelo asigno a ESE modo. Penaliza acertar la trayectoria sin creersela.
+        # Sin esto, un modelo con probabilidades mal calibradas puntua igual que uno
+        # bien calibrado, y la tesis compara justamente inicializaciones distintas, que
+        # es de lo que depende la calibracion.
+        prob_norm = predicted_prob / np.clip(predicted_prob.sum(axis=1, keepdims=True), 1e-9, None)
+        arg10 = np.argmin(top10_fde, axis=-1)
+        mejor10 = np.take_along_axis(top10_indices, arg10[:, None], axis=1).squeeze(1)
+        p_mejor10 = prob_norm[np.arange(bs), mejor10]
+        brier_minfde10 = minfde10 + (1.0 - p_mejor10) ** 2
+        # variante de un solo modo: el mas probable, que es el que reporta minFDE1
+        brier_minfde1 = minfde1 + (1.0 - prob_norm[np.arange(bs), top1_indices]) ** 2
+
         # nuScenes MissRateTopK uses max pointwise displacement over the full valid horizon, not FDE.
         valid_ade_diff = ade_diff.masked_fill(gt_traj_mask == 0, 0.0)
         max_displacement = valid_ade_diff.max(dim=-1).values.cpu().detach().numpy()
@@ -223,6 +238,8 @@ class BaseModel(pl.LightningModule):
             'minADE10': minade10,
             'minFDE1': minfde1,
             'minFDE10': minfde10,
+            'brier_minFDE1': brier_minfde1,
+            'brier_minFDE10': brier_minfde10,
             'miss_rate5': miss_rate5.astype(np.float32),
             'miss_rate10': miss_rate10.astype(np.float32)}
 

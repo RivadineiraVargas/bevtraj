@@ -35,7 +35,13 @@ def train(cfg):
         checkpoint_callback = ModelCheckpoint(
             dirpath='ckpt/' + cfg.exp_name,
             monitor='val/minADE5',
-            filename='{epoch}-{val/minADE5:.2f}',
+            # TESIS: sin `auto_insert_metric_name=False`, Lightning mete el NOMBRE de la
+            # metrica en el fichero, y como se llama `val/minADE5` la barra crea un
+            # directorio: queda `epoch=0-val/minADE5=3.90.ckpt`. Ademas los `=` rompen
+            # la gramatica de overrides de Hydra, asi que ese checkpoint no se puede
+            # pasar como `ckpt_path=...` para evaluarlo. Se deja un nombre plano.
+            filename='ep{epoch:02d}-ade{val/minADE5:.2f}',
+            auto_insert_metric_name=False,
             save_top_k=3,
             mode='min',  # 'min' for loss/error, 'max' for accuracy
             every_n_epochs=1,
