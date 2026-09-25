@@ -48,6 +48,17 @@ class BEVTraj(BaseModel):
         # pre-entrenados a la LR del decoder. Aca se declara explicitamente.
         self.freeze_sensor_encoder = self.config.get('freeze_sensor_encoder', False)
         self.sensor_encoder_lr_mult = self.config.get('sensor_encoder_lr_mult', 1.0)
+        # TESIS: brazo Z. Se le entrega al decoder el BEV de OTRA escena, en train y en
+        # eval. Responde a "¿aporta algo la escena, o el modelo predice solo del
+        # historico del agente?". Si Z empata con el brazo mas fuerte, todo el aparato
+        # de sensores no esta haciendo nada y ninguna comparacion de encoders significa
+        # nada. No se usan ceros: el exp. 32 de MOTF mostro que una entrada nula fabrica
+        # ventajas espurias por escala de inicializacion.
+        self.shuffle_bev = self.config.get('shuffle_bev', False)
+        if self.shuffle_bev:
+            from collections import deque
+            self._bev_buffer = deque(maxlen=16)
+            print("[Z] BRAZO Z ACTIVO: el BEV se sustituye por el de otra escena")
         if self.freeze_sensor_encoder:
             for p_ in self.sensor_encoder.parameters():
                 p_.requires_grad = False
@@ -58,6 +69,37 @@ class BEVTraj(BaseModel):
               f"{n_enc_train/1e6:.2f} M entrenables (freeze={self.freeze_sensor_encoder}, "
               f"lr_mult={self.sensor_encoder_lr_mult})")
         
+    def _barajar_bev(self, bev):
+        """Sustituye el BEV de cada muestra por el de OTRA escena (brazo Z).
+
+        Con lote > 1 basta una permutacion sin puntos fijos dentro del lote. Pero en
+        esta maquina se entrena a lote 1 por memoria, y ahi no hay con quien barajar:
+        una permutacion de un elemento es la identidad y el brazo Z seria el brazo
+        normal disfrazado. Por eso se guarda un buffer de los ultimos BEV vistos y se
+        toma uno de ahi.
+
+        El BEV del buffer va DESPRENDIDO del grafo, asi que el encoder no recibe
+        gradiente en este brazo. Es irrelevante mientras Z se corra con el encoder
+        congelado, que es el protocolo primario en esta maquina; si algun dia se corre Z
+        en el protocolo ajustado, hay que revisarlo.
+        """
+        import random
+        B = bev.shape[0]
+        if B > 1:
+            idx = list(range(B))
+            for i in range(B - 1, 0, -1):            # permutacion sin puntos fijos
+                j = random.randint(0, i - 1)
+                idx[i], idx[j] = idx[j], idx[i]
+            if idx[0] == 0:
+                idx[0], idx[1] = idx[1], idx[0]
+            return bev[idx]
+        if len(self._bev_buffer) > 0:
+            otro = random.choice(self._bev_buffer)
+            self._bev_buffer.append(bev.detach())
+            return otro.to(bev.device).expand_as(bev) if otro.shape != bev.shape else otro.to(bev.device)
+        self._bev_buffer.append(bev.detach())
+        return bev          # solo el primer paso, con el buffer vacio
+
     def train(self, mode=True):
         """TESIS: con el encoder congelado, mantenerlo en eval SIEMPRE.
 
@@ -94,6 +136,8 @@ class BEVTraj(BaseModel):
         # encoding
         pre_encoder_emb = self.pre_encoder(traj_data)
         bev_feature = self.sensor_encoder.get_bev_feature(sensor_data['batch_input_dict'], sensor_data['data_samples'])
+        if self.shuffle_bev:
+            bev_feature = self._barajar_bev(bev_feature)
         agent_feature, dense_future_feature, dense_future_pred, dense_future_goal = self.scene_context_encoder(
             traj_data, pre_encoder_emb, bev_feature, ego_dynamics
         )
