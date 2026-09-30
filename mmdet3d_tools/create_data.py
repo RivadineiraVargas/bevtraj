@@ -9,7 +9,7 @@ from mmdet3d_tools.dataset_converters import argo2_converter as argo2_converter
 from mmdet3d_tools.dataset_converters.update_infos_to_v2 import update_pkl_infos
 
 
-def make_token2idx(data_list, out_dir, is_val=False):
+def make_token2idx(data_list, out_dir, is_val=False, sufijo=''):
     token2idx = {}
     for i, data in enumerate(data_list):
         token = data['token']
@@ -18,7 +18,10 @@ def make_token2idx(data_list, out_dir, is_val=False):
             raise ValueError("Index not match")
         token2idx[token] = idx
     
-    file_name = "sample_token2idx_val.pkl" if is_val else "sample_token2idx_train.pkl"
+    # TESIS: el nombre era FIJO, asi que generar los infos de trainval pisaba en
+    # silencio el sample_token2idx del mini, que los configs *_mini siguen usando.
+    # Con `--token2idx-sufijo _trainval` conviven los dos.
+    file_name = f"sample_token2idx_{'val' if is_val else 'train'}{sufijo}.pkl"
     file_path = os.path.join(out_dir, file_name)
     
     with open(file_path, "wb") as f:
@@ -30,7 +33,8 @@ def nuscenes_data_prep(root_path,
                        version,
                        dataset_name,
                        out_dir,
-                       max_sweeps=10):
+                       max_sweeps=10,
+                       sufijo=''):
     """Prepare data related to nuScenes dataset.
 
     Related data consists of '.pkl' files recording basic infos,
@@ -59,8 +63,8 @@ def nuscenes_data_prep(root_path,
     train_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_train_path)
     val_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_val_path)
     
-    make_token2idx(train_data_list, out_dir=out_dir, is_val=False)
-    make_token2idx(val_data_list, out_dir=out_dir, is_val=True)
+    make_token2idx(train_data_list, out_dir=out_dir, is_val=False, sufijo=sufijo)
+    make_token2idx(val_data_list, out_dir=out_dir, is_val=True, sufijo=sufijo)
     
     
 def argo2_data_prep(root_path,
@@ -118,6 +122,7 @@ parser.add_argument(
     required=False,
     help='name of info pkl')
 parser.add_argument('--extra-tag', type=str, default='kitti')
+parser.add_argument('--token2idx-sufijo', type=str, default='')
 parser.add_argument(
     '--workers', type=int, default=4, help='number of threads to be used')
 args = parser.parse_args()
@@ -145,7 +150,8 @@ if __name__ == '__main__':
             version=train_version,
             dataset_name='NuScenesDataset',
             out_dir=args.out_dir,
-            max_sweeps=args.max_sweeps)
+            max_sweeps=args.max_sweeps,
+            sufijo=args.token2idx_sufijo)
     elif args.dataset == 'argo2': 
         argo2_data_prep(
             root_path=args.root_path,

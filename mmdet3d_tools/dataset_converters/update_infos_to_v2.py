@@ -380,7 +380,7 @@ def update_argo2_infos(pkl_path, out_dir):
     
     return converted_list
 
-def update_nuscenes_infos(pkl_path, out_dir):
+def update_nuscenes_infos(pkl_path, out_dir, con_camara=True):
     camera_types = [
         'CAM_FRONT',
         'CAM_FRONT_RIGHT',
@@ -400,10 +400,17 @@ def update_nuscenes_infos(pkl_path, out_dir):
         ('car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle',
          'motorcycle', 'pedestrian', 'traffic_cone', 'barrier'),
     }
+    # TESIS: NuScenes (8,4 GB en RAM con trainval) se carga SOLO para calcular las
+    # cajas 2D de las camaras (`cam_instances`). Con trainval eso, sumado a los infos
+    # en memoria, hizo que el kernel matara el proceso por falta de RAM el 30/09 (11,8
+    # GB residentes en una maquina de 15). En la variante solo-LiDAR `cam_instances`
+    # no se lee nunca: NuScenesDataset solo lo usa con load_type='mv_image_based', y
+    # los configs usan el valor por defecto 'frame_based'. Con con_camara=False no se
+    # carga NuScenes y la clave no se escribe; el resto del info es identico.
     nusc = NuScenes(
         version=data_list['metadata']['version'],
         dataroot='./data/nuscenes',
-        verbose=True)
+        verbose=True) if con_camara else None
 
     print('Start updating:')
     converted_list = []
@@ -498,9 +505,10 @@ def update_nuscenes_infos(pkl_path, out_dir):
                     'valid_flag'][i]
                 empty_instance = clear_instance_unused_keys(empty_instance)
                 temp_data_info['instances'].append(empty_instance)
-            temp_data_info[
-                'cam_instances'] = generate_nuscenes_camera_instances(
-                    ori_info_dict, nusc)
+            if con_camara:
+                temp_data_info[
+                    'cam_instances'] = generate_nuscenes_camera_instances(
+                        ori_info_dict, nusc)
         if 'pts_semantic_mask_path' in ori_info_dict:
             temp_data_info['pts_semantic_mask_path'] = Path(
                 ori_info_dict['pts_semantic_mask_path']).name
@@ -546,9 +554,10 @@ def parse_args():
     return args
 
 
-def update_pkl_infos(dataset, out_dir, pkl_path):
+def update_pkl_infos(dataset, out_dir, pkl_path, con_camara=True):
     if dataset.lower() == 'nuscenes':
-        converted_list = update_nuscenes_infos(pkl_path=pkl_path, out_dir=out_dir)
+        converted_list = update_nuscenes_infos(pkl_path=pkl_path, out_dir=out_dir,
+                                               con_camara=con_camara)
     elif dataset.lower() == 'argo2':
         converted_list = update_argo2_infos(pkl_path=pkl_path, out_dir=out_dir)
     else:
