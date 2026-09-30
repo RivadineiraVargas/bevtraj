@@ -34,15 +34,18 @@ def train(cfg):
     if cfg.save_checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath='ckpt/' + cfg.exp_name,
-            monitor='val/minADE5',
+            # TESIS: monitor configurable. El diseno prohibe reportar minADE_k solo, asi
+            # que no debe ser tampoco el criterio de seleccion; el piloto usa
+            # brier-minFDE1. Por defecto se conserva el del original.
+            monitor=cfg.method.get('ckpt_monitor', 'val/minADE5'),
             # TESIS: sin `auto_insert_metric_name=False`, Lightning mete el NOMBRE de la
             # metrica en el fichero, y como se llama `val/minADE5` la barra crea un
             # directorio: queda `epoch=0-val/minADE5=3.90.ckpt`. Ademas los `=` rompen
             # la gramatica de overrides de Hydra, asi que ese checkpoint no se puede
             # pasar como `ckpt_path=...` para evaluarlo. Se deja un nombre plano.
-            filename='ep{epoch:02d}-ade{val/minADE5:.2f}',
+            filename='ep{epoch:02d}-ade{val/minADE5:.2f}-brier{val/brier_minFDE1:.2f}',
             auto_insert_metric_name=False,
-            save_top_k=3,
+            save_top_k=1,   # TESIS: disco al 95 %; 311 MB por checkpoint
             mode='min',  # 'min' for loss/error, 'max' for accuracy
             every_n_epochs=1,
         )
@@ -60,9 +63,13 @@ def train(cfg):
             save_last=True,
         ))
 
+    # TESIS: el original no barajaba: el mismo orden en TODAS las epocas. Barajar entre
+    # epocas es lo estandar; se aplica igual a todos los brazos y se declara. Con la
+    # estrategia DDP, Lightning lo convierte en un DistributedSampler con shuffle que se
+    # rebaraja en cada epoca con la semilla.
     train_loader = DataLoader(
         train_set, batch_size=train_batch_size, num_workers=cfg.load_num_workers, drop_last=False,
-        collate_fn=train_set.collate_fn)
+        shuffle=cfg.method.get('shuffle_train', True), collate_fn=train_set.collate_fn)
 
     val_loader = DataLoader(
         val_set, batch_size=eval_batch_size, num_workers=cfg.load_num_workers, shuffle=False, drop_last=False,
@@ -100,6 +107,14 @@ def train(cfg):
                   f"distinto por brazo y semilla, o borre ese directorio.")
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.ckpt_path)
+
+    # TESIS: `last.ckpt` solo se escribe cada `ckpt_every_n_steps` pasos, asi que al
+    # terminar puede ir hasta 999 pasos por detras del modelo final (en el piloto,
+    # 12.288 pasos -> ultimo guardado en el 12.000). Para evaluar "el ultimo epoch" sin
+    # sesgo se guarda el estado FINAL de forma explicita.
+    if cfg.save_checkpoint:
+        trainer.save_checkpoint(os.path.join('ckpt', cfg.exp_name, 'final.ckpt'))
+        print(f"[train] modelo final guardado en ckpt/{cfg.exp_name}/final.ckpt")
 
 
 if __name__ == '__main__':

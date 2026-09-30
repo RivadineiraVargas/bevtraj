@@ -562,6 +562,12 @@ class BaseDataset(Dataset):
         rng.shuffle(claves)
         if not self.is_validation:
             claves = claves[:data_usage]
+        elif self.config.get('val_subset_num', None):
+            # TESIS: validar cada epoca sobre train_val entero cuesta ~19 min (medido);
+            # con el 10 % de etiquetas seria mas que el propio entrenamiento. Se valida
+            # sobre un subconjunto FIJO, el mismo para todos los brazos, y train_val
+            # completo solo al final, con el modelo final.
+            claves = claves[:int(self.config['val_subset_num'])]
         return {k: file_list[k] for k in claves}
 
     def get_agent_data(

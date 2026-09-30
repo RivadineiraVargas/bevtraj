@@ -55,6 +55,10 @@ def main():
     ap.add_argument('--corte', type=float, default=0.25, help='frontera pasado/presente en s (4d)')
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--limite', type=int, default=0, help='usar sólo N muestras')
+    ap.add_argument('--muestras', type=int, default=0,
+                    help='N muestras al azar (con --semilla) repartidas entre escenas')
+    ap.add_argument('--excluir-escenas-de', nargs='*', default=[],
+                    help='directorios ScenarioNet cuyas ESCENAS no deben verse al pre-entrenar')
     ap.add_argument('--salida', required=True)
     a = ap.parse_args()
 
@@ -71,6 +75,27 @@ def main():
     sc = OmegaConf.to_container(cfg.TRAIN_DATASET.SENSOR_DATASET, resolve=True)
     ds = NuScenesDataset(**sc)
     idx = list(range(len(ds)))
+    # TESIS: el pre-entrenamiento no debe ver nubes de las escenas con que luego se
+    # selecciona o se evalua el modelo. Aunque no use etiquetas, veria exactamente los
+    # entornos de train_val/val y la seleccion dejaria de ser limpia. Se excluye por
+    # ESCENA, no por muestra, porque las muestras vecinas de una escena son casi iguales.
+    if a.excluir_escenas_de:
+        import json
+        nombre2tok = {s['name']: s['token'] for s in json.load(open(
+            f"{sc['data_root']}/v1.0-trainval/scene.json"))}
+        fuera = set()
+        for d in a.excluir_escenas_de:
+            import pickle as _pk
+            summ = _pk.load(open(f"{d}/dataset_summary.pkl", 'rb'))
+            fuera |= {nombre2tok[m['id'].split('_')[0]] for m in summ.values()}
+        antes = len(idx)
+        idx = [i for i in idx if ds.get_data_info(i)['scene_token'] not in fuera]
+        print(f"[C2] excluidas {len(fuera)} escenas: {antes} -> {len(idx)} muestras", flush=True)
+    if a.muestras:
+        rng = np.random.RandomState(a.semilla)
+        idx = sorted(rng.choice(idx, size=min(a.muestras, len(idx)), replace=False).tolist())
+        n_esc = len({ds.get_data_info(i)['scene_token'] for i in idx})
+        print(f"[C2] {len(idx)} muestras al azar de {n_esc} escenas distintas", flush=True)
     if a.limite:
         idx = idx[:a.limite]
     sub = torch.utils.data.Subset(ds, idx)
