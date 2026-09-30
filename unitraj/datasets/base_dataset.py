@@ -57,16 +57,22 @@ class BaseDataset(Dataset):
                     if os.path.exists(self.cache_path):
                         shutil.rmtree(self.cache_path)
                     os.makedirs(self.cache_path, exist_ok=True)
-                    process_num = os.cpu_count() - 1
+                    # TESIS: el original usaba os.cpu_count()-1, que aqui son 19 procesos
+                    # en 15 GB de RAM; si el kernel mata uno, el Pool se queda colgado en
+                    # vez de fallar. Se limita con `cache_num_workers` en el config.
+                    process_num = int(self.config.get('cache_num_workers', os.cpu_count() - 1))
                     print('Using {} processes to load data...'.format(process_num))
 
                     data_splits = np.array_split(summary_list, process_num)
 
                     data_splits = [(data_path, mapping, list(data_splits[i]), dataset_name) for i in range(process_num)]
                     # save the data_splits in a tmp directory
-                    os.makedirs('tmp', exist_ok=True)
+                    # TESIS: `tmp/` era relativo al directorio de trabajo y compartido por
+                    # todas las construcciones: dos a la vez se pisaban los trozos.
+                    self._tmp_dir = os.path.join(self.cache_path, '_tmp_trozos')
+                    os.makedirs(self._tmp_dir, exist_ok=True)
                     for i in range(process_num):
-                        with open(os.path.join('tmp', '{}.pkl'.format(i)), 'wb') as f:
+                        with open(os.path.join(self._tmp_dir, '{}.pkl'.format(i)), 'wb') as f:
                             pickle.dump(data_splits[i], f)
 
                     # results = self.process_data_chunk(0)
@@ -80,12 +86,9 @@ class BaseDataset(Dataset):
 
                     with open(os.path.join(self.cache_path, 'file_list.pkl'), 'wb') as f:
                         pickle.dump(file_list, f)
+                    shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
-                    data_list = list(file_list.items())
-                    np.random.shuffle(data_list)
-                    if not self.is_validation:
-                        # randomly sample data_usage number of data
-                        file_list = dict(data_list[:data_usage_this_dataset])
+                    file_list = self._submuestra(file_list, data_usage_this_dataset)
 
             print('Loaded {} samples from {}'.format(len(file_list) * self.data_chunk_size, data_path))
             self.data_loaded.update(file_list)
@@ -106,7 +109,7 @@ class BaseDataset(Dataset):
         print('Data loaded')
 
     def process_data_chunk(self, worker_index):
-        with open(os.path.join('tmp', '{}.pkl'.format(worker_index)), 'rb') as f:
+        with open(os.path.join(self._tmp_dir, '{}.pkl'.format(worker_index)), 'rb') as f:
             data_chunk = pickle.load(f)
         file_list = {}
         data_path, mapping, data_list, dataset_name = data_chunk
@@ -537,15 +540,29 @@ class BaseDataset(Dataset):
         else:
             raise ValueError('Error: file_list.pkl not found')
 
-        data_list = list(data_loaded.items())
-        np.random.shuffle(data_list)
+        return self._submuestra(data_loaded, data_usage)
 
+    def _submuestra(self, file_list, data_usage):
+        """Subconjunto de entrenamiento DETERMINISTA e independiente de la semilla.
+
+        TESIS: el original barajaba con el generador global de numpy y tomaba los
+        primeros `max_data_num`. Con todos los datos da igual, pero en el regimen de
+        pocas etiquetas el subconjunto dependeria de la semilla de entrenamiento y de
+        cuantos numeros aleatorios hubiera consumido antes cualquier otra pieza: dos
+        brazos, o dos semillas del mismo brazo, podrian entrenar con muestras DISTINTAS
+        y la diferencia se atribuiria al encoder. Aqui el subconjunto sale de claves
+        ordenadas y de un generador propio con `data_subset_seed` (config, defecto 0):
+        todos los brazos y semillas ven exactamente las mismas muestras.
+
+        El orden resultante se sigue barajando (con ese mismo generador) para no
+        alterar la mezcla que el DataLoader recibe.
+        """
+        claves = sorted(file_list.keys())
+        rng = np.random.RandomState(int(self.config.get('data_subset_seed', 0)))
+        rng.shuffle(claves)
         if not self.is_validation:
-            # randomly sample data_usage number of data
-            data_loaded = dict(data_list[:data_usage])
-        else:
-            data_loaded = dict(data_list)
-        return data_loaded
+            claves = claves[:data_usage]
+        return {k: file_list[k] for k in claves}
 
     def get_agent_data(
             self, center_objects, obj_trajs_past, obj_trajs_future, track_index_to_predict, sdc_track_index, timestamps,
