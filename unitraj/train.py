@@ -43,7 +43,7 @@ def train(cfg):
             # directorio: queda `epoch=0-val/minADE5=3.90.ckpt`. Ademas los `=` rompen
             # la gramatica de overrides de Hydra, asi que ese checkpoint no se puede
             # pasar como `ckpt_path=...` para evaluarlo. Se deja un nombre plano.
-            filename='ep{epoch:02d}-ade{val/minADE5:.2f}-brier{val/brier_minFDE1:.2f}',
+            filename='ep{epoch:02d}-ade{val/minADE5:.2f}-brier{val/brier_minFDE10:.2f}',
             auto_insert_metric_name=False,
             save_top_k=1,   # TESIS: disco al 95 %; 311 MB por checkpoint
             mode='min',  # 'min' for loss/error, 'max' for accuracy

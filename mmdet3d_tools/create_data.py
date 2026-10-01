@@ -34,7 +34,8 @@ def nuscenes_data_prep(root_path,
                        dataset_name,
                        out_dir,
                        max_sweeps=10,
-                       sufijo=''):
+                       sufijo='',
+                       con_camara=True):
     """Prepare data related to nuScenes dataset.
 
     Related data consists of '.pkl' files recording basic infos,
@@ -60,8 +61,15 @@ def nuscenes_data_prep(root_path,
     info_train_path = osp.join(out_dir, f'{info_prefix}_infos_train.pkl')
     info_val_path = osp.join(out_dir, f'{info_prefix}_infos_val.pkl')
     
-    train_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_train_path)
-    val_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_val_path)
+    # TESIS: con_camara=False evita cargar NuScenes entero (8,4 GB con trainval) solo
+    # para las cajas 2D de camara, que la variante solo-LiDAR no lee nunca. Sin esto,
+    # el 30/09 el kernel mato este paso por falta de RAM. El parametro se anadio en
+    # update_infos_to_v2.py pero no se habia conectado aqui (revision de codigo del 01/10):
+    # regenerar los infos por esta via normal habria repetido el OOM.
+    train_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_train_path,
+                                       con_camara=con_camara)
+    val_data_list = update_pkl_infos('nuscenes', out_dir=out_dir, pkl_path=info_val_path,
+                                     con_camara=con_camara)
     
     make_token2idx(train_data_list, out_dir=out_dir, is_val=False, sufijo=sufijo)
     make_token2idx(val_data_list, out_dir=out_dir, is_val=True, sufijo=sufijo)
@@ -123,6 +131,8 @@ parser.add_argument(
     help='name of info pkl')
 parser.add_argument('--extra-tag', type=str, default='kitti')
 parser.add_argument('--token2idx-sufijo', type=str, default='')
+parser.add_argument('--sin-camara', action='store_true',
+                    help='no generar cam_instances ni cargar NuScenes (variante solo-LiDAR)')
 parser.add_argument(
     '--workers', type=int, default=4, help='number of threads to be used')
 args = parser.parse_args()
@@ -151,7 +161,8 @@ if __name__ == '__main__':
             dataset_name='NuScenesDataset',
             out_dir=args.out_dir,
             max_sweeps=args.max_sweeps,
-            sufijo=args.token2idx_sufijo)
+            sufijo=args.token2idx_sufijo,
+            con_camara=not args.sin_camara)
     elif args.dataset == 'argo2': 
         argo2_data_prep(
             root_path=args.root_path,

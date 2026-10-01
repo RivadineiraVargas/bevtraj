@@ -56,7 +56,13 @@ def main():
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--limite', type=int, default=0, help='usar sólo N muestras')
     ap.add_argument('--muestras', type=int, default=0,
-                    help='N muestras al azar (con --semilla) repartidas entre escenas')
+                    help='N muestras al azar (con --semilla-datos) repartidas entre escenas')
+    # TESIS: semilla PROPIA para elegir las nubes, separada de --semilla (pesos y orden).
+    # Antes las dos eran la misma, el acoplamiento que base_dataset._submuestra corrige en
+    # el entrenamiento: con dos semillas de pre-entrenamiento cambiaria A LA VEZ la
+    # inicializacion y que nubes se vieron. Por defecto 0, lo que reproduce exactamente el
+    # piloto del 30/09 (que corrio con --semilla 0).
+    ap.add_argument('--semilla-datos', type=int, default=0)
     ap.add_argument('--excluir-escenas-de', nargs='*', default=[],
                     help='directorios ScenarioNet cuyas ESCENAS no deben verse al pre-entrenar')
     ap.add_argument('--salida', required=True)
@@ -92,7 +98,7 @@ def main():
         idx = [i for i in idx if ds.get_data_info(i)['scene_token'] not in fuera]
         print(f"[C2] excluidas {len(fuera)} escenas: {antes} -> {len(idx)} muestras", flush=True)
     if a.muestras:
-        rng = np.random.RandomState(a.semilla)
+        rng = np.random.RandomState(a.semilla_datos)
         idx = sorted(rng.choice(idx, size=min(a.muestras, len(idx)), replace=False).tolist())
         n_esc = len({ds.get_data_info(i)['scene_token'] for i in idx})
         print(f"[C2] {len(idx)} muestras al azar de {n_esc} escenas distintas", flush=True)
@@ -206,7 +212,7 @@ def guarda(modelo, a, ep, perdida):
     Path(a.salida).parent.mkdir(parents=True, exist_ok=True)
     torch.save(dict(state_dict=sd,
                     meta=dict(objetivo=a.objetivo, epoca=ep, perdida=float(perdida),
-                              semilla=a.semilla, config=a.config,
+                              semilla=a.semilla, semilla_datos=a.semilla_datos, config=a.config,
                               ratio=a.ratio, corte=a.corte)),
                a.salida)
     print(f"[C2] guardadas {len(sd)} claves en {a.salida} "
