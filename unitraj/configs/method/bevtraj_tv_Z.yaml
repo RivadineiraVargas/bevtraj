@@ -405,6 +405,7 @@ test_pipeline: &test_pipeline
       reduce_beams: 32
       pad_empty_sweeps: true
       remove_close: true
+      test_mode: true   # TESIS: v2, los 9 barridos mas cercanos, sin azar
 
 
     - type: MIT_GlobalRotScaleTrans
