@@ -65,8 +65,9 @@ def train(cfg):
 
     # TESIS: EMA de los pesos (ver utils/ema.py). Solo si el config trae `ema_decay`;
     # sin el, todo queda exactamente como antes.
-    from utils.ema import RegistraOrden
+    from utils.ema import RegistraOrden, RegistraValidacion
     call_backs.append(RegistraOrden())
+    call_backs.append(RegistraValidacion(os.path.join('ckpt', cfg.exp_name, 'validacion.jsonl')))
     ema = None
     if cfg.method.get('ema_decay', None):
         from utils.ema import EMAPesos
@@ -98,6 +99,10 @@ def train(cfg):
         accumulate_grad_batches=cfg.method.get('accumulate_grad_batches', 1),
         num_sanity_val_steps=0,
         enable_checkpointing=cfg.save_checkpoint,
+        # TESIS: precision configurable; por defecto la de Lightning 2.1 ('32-true'), es
+        # decir, la de BEVTraj publicado. '16-mixed' solo tras validarla (BEVFusion entrena
+        # en fp16, pero BEVTraj en fp32).
+        precision=cfg.method.get('precision', '32-true'),
     )
 
     # TESIS: la reanudacion automatica pasa a ser EXPLICITA (`auto_resume: true`).

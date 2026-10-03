@@ -113,3 +113,26 @@ class RegistraOrden(pl.Callback):
                 print(f"[orden] muestreador {tipo}: no distribuido, el orden depende del estado global")
         except Exception as e:
             print(f"[orden] no se pudo registrar el orden: {type(e).__name__}: {e}")
+
+
+class RegistraValidacion(pl.Callback):
+    """TESIS: escribe las metricas de cada validacion en un JSONL (una linea por epoca).
+
+    Para el criterio de CONVERGENCIA hace falta la curva de validacion legible y en disco;
+    hasta el 03/10 solo quedaba el minigrafico de wandb. Se usa on_validation_end y no
+    on_validation_epoch_end porque en este ultimo Lightning todavia no ha agregado las
+    metricas de la epoca (ModelCheckpoint usa el mismo gancho). Abre en modo anadir: una
+    corrida reanudada sigue el mismo fichero; cada linea lleva el paso para deduplicar.
+    """
+    def __init__(self, ruta):
+        self.ruta = ruta
+
+    def on_validation_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+        import json, os
+        fila = {"epoca": int(trainer.current_epoch), "paso": int(trainer.global_step)}
+        fila.update({k: float(v) for k, v in trainer.callback_metrics.items() if k.startswith("val/")})
+        os.makedirs(os.path.dirname(self.ruta), exist_ok=True)
+        with open(self.ruta, "a") as f:
+            f.write(json.dumps(fila) + "\n")
