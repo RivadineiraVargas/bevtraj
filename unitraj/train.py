@@ -63,6 +63,16 @@ def train(cfg):
             save_last=True,
         ))
 
+    # TESIS: EMA de los pesos (ver utils/ema.py). Solo si el config trae `ema_decay`;
+    # sin el, todo queda exactamente como antes.
+    from utils.ema import RegistraOrden
+    call_backs.append(RegistraOrden())
+    ema = None
+    if cfg.method.get('ema_decay', None):
+        from utils.ema import EMAPesos
+        ema = EMAPesos(float(cfg.method['ema_decay']))
+        call_backs.append(ema)
+
     # TESIS: el original no barajaba: el mismo orden en TODAS las epocas. Barajar entre
     # epocas es lo estandar; se aplica igual a todos los brazos y se declara. Con la
     # estrategia DDP, Lightning lo convierte en un DistributedSampler con shuffle que se
@@ -115,6 +125,8 @@ def train(cfg):
     if cfg.save_checkpoint:
         trainer.save_checkpoint(os.path.join('ckpt', cfg.exp_name, 'final.ckpt'))
         print(f"[train] modelo final guardado en ckpt/{cfg.exp_name}/final.ckpt")
+        if ema is not None:
+            ema.guardar_con_ema(trainer, model, os.path.join('ckpt', cfg.exp_name, 'final_ema.ckpt'))
 
 
 if __name__ == '__main__':

@@ -27,7 +27,20 @@ class BEVTraj(BaseModel):
         dec_dim = config['DECODER']['d_model']
         
         self.pre_encoder = BEVTrajPreEncoder(self.config['PRE_ENCODER'])
+        # TESIS: numeros aleatorios COMUNES entre brazos. Con `aislar_rng_encoder`, todo
+        # lo que va despues del encoder se inicializa desde una sub-semilla sacada ANTES
+        # de construirlo, asi que no depende de como se inicialice el encoder. MEDIDO el
+        # 03/10/2026 (tools/prueba_instrumento_v2.py, T2): en v1 ya salia identico entre
+        # A y B (init_weights no consume numeros aleatorios); se mantiene como garantia
+        # barata frente a cambios futuros del encoder (p. ej. una init_cfg aleatoria) y
+        # la prueba T2 lo verifica. Apagado por defecto: las corridas historicas se
+        # reproducen igual.
+        aislar = bool(self.config.get('aislar_rng_encoder', False))
+        if aislar:
+            sub_semilla = int(torch.randint(0, 2**31 - 1, (1,)).item())
         self.sensor_encoder = BEVFusion(**self.config['SENSOR_ENCODER'])
+        if aislar:
+            torch.manual_seed(sub_semilla)
         self.scene_context_encoder = BEVTrajSceneContextEncoder(
                         self.config['SCENE_CONTEXT_ENCODER'], config['PRE_ENCODER']['d_model'], bev_feat_dim)
         self.decoder = BEVTrajDecoder(self.config['DECODER'])
@@ -48,6 +61,10 @@ class BEVTraj(BaseModel):
         # pre-entrenados a la LR del decoder. Aca se declara explicitamente.
         self.freeze_sensor_encoder = self.config.get('freeze_sensor_encoder', False)
         self.sensor_encoder_lr_mult = self.config.get('sensor_encoder_lr_mult', 1.0)
+        # TESIS: posicion del origen del LiDAR en el marco del vehiculo (x adelante,
+        # y izquierda), en metros; None = comportamiento original. Ver prepare_decoder_input.
+        off = self.config.get('lidar_origin_offset', None)
+        self.lidar_origin_offset = None if off is None else (float(off[0]), float(off[1]))
         # TESIS: brazo Z. Se le entrega al decoder el BEV de OTRA escena, en train y en
         # eval. Responde a "¿aporta algo la escena, o el modelo predice solo del
         # historico del agente?". Si Z empata con el brazo mas fuerte, todo el aparato
@@ -212,6 +229,20 @@ class BEVTraj(BaseModel):
             'ego_sin': agents_in[B_idx, ego_idx, -1, -6:-5], # (B, 1)
             'ego_cos': agents_in[B_idx, ego_idx, -1, -5:-4], # (B, 1)
         }
+
+        # TESIS: el BEV esta centrado en el ORIGEN DEL LIDAR, no en el del vehiculo. En
+        # nuScenes el sensor va 0,8911/0,9437/0,9858 m por delante (lidar2ego, y = 0);
+        # el original tomaba la posicion del vehiculo como centro del BEV y todo lo que
+        # lee o escribe en el BEV quedaba ~0,94 m desplazado hacia atras. MEDIDO el
+        # 02/10/2026 sobre 3.732 vehiculos: aciertos a 0,4 m del 40 % al 51 % al
+        # corregirlo. Solo se traslada: el giro de -90 grados del marco LiDAR ya lo
+        # compensa la convencion de muestreo (verificado en el mismo diagnostico).
+        # Todas las transformaciones target<->BEV leen ego_x/ego_y de aqui.
+        off = self.lidar_origin_offset
+        if off is not None:
+            s, c = ego_dynamics['ego_sin'], ego_dynamics['ego_cos']
+            ego_dynamics['ego_x'] = ego_dynamics['ego_x'] + off[0] * c - off[1] * s
+            ego_dynamics['ego_y'] = ego_dynamics['ego_y'] + off[0] * s + off[1] * c
 
         return ego_dynamics
     

@@ -1,5 +1,5 @@
 # GENERADO por tesis_lidar/tools/genera_configs_tv.py -- no editar a mano.
-# Brazo B: supervisado con mapa HD (techo de referencia). nuScenes TRAINVAL.
+# Brazo B: supervisado con mapa HD, checkpoint SOLO LiDAR (mIoU de mapa 0,576 medido). nuScenes TRAINVAL. Instrumento v2.
 # experiment_name (for wandb)
 
 exp_name: &exp_name 'tv_B'
@@ -7,6 +7,7 @@ exp_name: &exp_name 'tv_B'
 # train
 
 max_epochs: &max_epochs 10
+ema_decay: 0.999   # TESIS: v2, guarda tambien final_ema.ckpt (lectura adicional)
 train_batch_size: &train_batch_size 1   # TESIS: 8 GB de GPU; lote 2 da OOM (medido)
 eval_batch_size: &eval_batch_size 1
 grad_clip_norm: 5
@@ -47,6 +48,8 @@ MODEL:
     # El valor debe ser EL MISMO en todos los brazos: si el brazo B usara 0.1 y el A
     # 1.0, la comparacion confundiria inicializacion con horario de aprendizaje.
     freeze_sensor_encoder: false
+    lidar_origin_offset: [0.9437, 0.0]   # TESIS: v2, el BEV esta centrado en el LiDAR
+    aislar_rng_encoder: true   # TESIS: v2, mismo decoder inicial en todos los brazos
     sensor_encoder_lr_mult: 1.0
 
     PRE_ENCODER:
@@ -129,7 +132,7 @@ MODEL:
                 loss_type: focal
                 use_grid_transform: true
         dataset_name: *dataset_name
-        weight_path: pretraining_ckpt/bevfusion-seg.pth  # TESIS: brazo B, supervisado con mapa HD (techo de referencia)
+        weight_path: pretraining_ckpt/lidar-only-seg.pth  # TESIS: brazo B, supervisado con mapa HD, checkpoint SOLO LiDAR (mIoU de mapa 0,576 medido)
     
     SCENE_CONTEXT_ENCODER:
         future_len: *future_len
