@@ -16,7 +16,9 @@ Detalles que importan:
   - Calentamiento: decay efectivo min(decay, (1+n)/(10+n)), para que los primeros pasos
     (pesos casi aleatorios) no pesen durante miles de pasos.
   - Solo parametros con requires_grad: el encoder congelado no cambia. Los buffers
-    (BatchNorm) se quedan los del modelo vivo, que es la practica estandar.
+    (BatchNorm) se quedan los del modelo vivo. Es una DECISION de diseno, no "la practica
+    estandar" como decia este comentario hasta la auditoria del 09/10/2026: timm
+    (ModelEmaV2) si los promedia. Se declara y se mantiene igual en todos los brazos.
   - Guarda y recupera su estado en los checkpoints de Lightning: una corrida reanudada
     sigue el mismo promedio.
 """
@@ -114,6 +116,22 @@ class RegistraOrden(pl.Callback):
         except Exception as e:
             print(f"[orden] no se pudo registrar el orden: {type(e).__name__}: {e}")
 
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        # TESIS (auditoria 09/10/2026): el orden REAL de cada epoca, leido del lote y no del
+        # muestreador. Tras la reanudacion de calibra_B el muestreador decia una epoca y el
+        # iterador servia el orden de otra; asi queda en el log que muestras se vieron, y
+        # una corrida reanudada se puede comparar con una sin cortes (prueba_reanudacion.sh).
+        if batch_idx > 1:
+            return
+        try:
+            d = batch['traj_data']['input_dict']
+            ids = [str(x) for x in list(d.get('scenario_id', []))[:2]]
+            obj = [str(x) for x in list(d.get('center_objects_id', []))[:2]]
+            print(f"[orden] epoca {trainer.current_epoch} lote {batch_idx}: escenario {ids} objeto {obj} "
+                  f"(paso global {trainer.global_step})", flush=True)
+        except Exception as e:
+            print(f"[orden] no se pudo registrar el lote: {type(e).__name__}: {e}")
+
 
 class RegistraValidacion(pl.Callback):
     """TESIS: escribe las metricas de cada validacion en un JSONL (una linea por epoca).
@@ -132,6 +150,11 @@ class RegistraValidacion(pl.Callback):
             return
         import json, os
         fila = {"epoca": int(trainer.current_epoch), "paso": int(trainer.global_step)}
+        # TESIS (auditoria 09/10/2026): la LR con que se entreno la epoca (la fija
+        # BEVTraj.on_train_epoch_start). tools/verifica_corrida.py la compara con el programa.
+        lr = getattr(pl_module, '_lr_epoca', None)
+        if lr is not None:
+            fila["lr"] = lr
         fila.update({k: float(v) for k, v in trainer.callback_metrics.items() if k.startswith("val/")})
         os.makedirs(os.path.dirname(self.ruta), exist_ok=True)
         with open(self.ruta, "a") as f:

@@ -8,9 +8,14 @@ import torch
 
 
 def find_latest_checkpoint(base_path):
-    # TESIS: `last.ckpt` lo escribe el callback por pasos y es SIEMPRE el mas
-    # reciente. Antes se buscaba solo entre los top-3 por val/minADE5, asi que
-    # un corte a mitad de epoca reanudaba desde una epoca vieja sin avisar.
+    # TESIS: desde la auditoria del 09/10/2026 el estado reanudable es `fin-epoca.ckpt`,
+    # que se escribe al cerrar cada epoca. `last.ckpt` (de corridas anteriores, guardado
+    # cada N pasos) solo se devuelve si no hay otro; train.py rechaza reanudar desde el si
+    # no esta en una frontera de epoca. Antes se buscaba entre los top-3 por val/minADE5,
+    # asi que un corte reanudaba desde una epoca vieja sin avisar.
+    fin = os.path.join(base_path, 'fin-epoca.ckpt')
+    if os.path.exists(fin):
+        return fin
     last = os.path.join(base_path, 'last.ckpt')
     if os.path.exists(last):
         return last

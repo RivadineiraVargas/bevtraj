@@ -2,6 +2,24 @@ import math
 from torch.optim.lr_scheduler import _LRScheduler
 
 
+def fija_lr_de_epoca(sch, epoca):
+    """TESIS (auditoria 09/10/2026): fija la LR de la epoca como funcion PURA de la epoca.
+
+    Lightning 2.1 avanza los schedulers por epoca una vez de mas en la primera epoca tras
+    reanudar (calibra_B: epocas 3-14 con la LR de la siguiente). Llamada al empezar cada
+    epoca, deja last_epoch = epoca y la LR de todos los grupos = get_lr(), que es lo que
+    el scheduler da en una corrida sin cortes. Devuelve (lrs, last_epoch que traia).
+    Probada en tools/prueba_lr_por_epoca.py (incluido que sin ella la prueba falla).
+    """
+    traia = sch.last_epoch
+    sch.last_epoch = int(epoca)
+    lrs = sch.get_lr()
+    for g, lr in zip(sch.optimizer.param_groups, lrs):
+        g['lr'] = lr
+    sch._last_lr = list(lrs)
+    return [float(l) for l in lrs], traia
+
+
 class WarmupCosLR(_LRScheduler):
     def __init__(
         self, optimizer, min_lr, lr, warmup_epochs, epochs, last_epoch=-1, verbose=False

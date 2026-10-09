@@ -35,11 +35,17 @@ def rasteriza(puntos, rango, hw, canal_z=2):
     H, W = hw
     x0, y0, _, x1, y1, _ = rango
     x, y, z = puntos[:, 0], puntos[:, 1], puntos[:, canal_z]
-    # columna = x, fila = y, igual que la convención del BEV del encoder
-    cx = ((x - x0) / (x1 - x0) * W).long()
-    cy = ((y - y0) / (y1 - y0) * H).long()
-    ok = (cx >= 0) & (cx < W) & (cy >= 0) & (cy < H)
-    idx = (cy[ok] * W + cx[ok])
+    # TESIS (auditoria 09/10/2026): FILA = x, COLUMNA = y, la disposicion MEDIDA del BEV del
+    # encoder (diagnostico_bev.py: IoU 0,69 frente a 0,27 traspuesta; el voxelizador emite
+    # (x, y, z) y sparse_encoder deja (N, C*D, X, Y)), la misma de etiquetas_futuro.celdas.
+    # Hasta el 09/10 aqui ponia "columna = x, fila = y, igual que la convencion del BEV", lo
+    # que era falso: los objetivos de C_4d y C_mae quedaban TRASPUESTOS respecto del BEV (la
+    # cabeza debia predecir en (x=a, y=b) lo que hay en (x=b, y=a)), sin ningun error, porque
+    # la rejilla es cuadrada. Lo protege tools/prueba_rasteriza.py.
+    fx = ((x - x0) / (x1 - x0) * H).long()
+    cy = ((y - y0) / (y1 - y0) * W).long()
+    ok = (fx >= 0) & (fx < H) & (cy >= 0) & (cy < W)
+    idx = (fx[ok] * W + cy[ok])
     n = torch.zeros(H * W, device=puntos.device, dtype=torch.float32)
     n.scatter_add_(0, idx, torch.ones_like(idx, dtype=torch.float32))
     sz = torch.zeros_like(n)
@@ -98,9 +104,10 @@ class CabezaMAE(nn.Module):
         """Quita de la nube los puntos que caen en bloques ocultos."""
         H, W = hw
         x0, y0, _, x1, y1, _ = self.rango
-        cx = ((puntos[:, 0] - x0) / (x1 - x0) * W).long().clamp(0, W - 1)
-        cy = ((puntos[:, 1] - y0) / (y1 - y0) * H).long().clamp(0, H - 1)
-        return puntos[~m[cy, cx]]
+        # TESIS (auditoria 09/10/2026): fila = x, columna = y, como rasteriza y el BEV.
+        fx = ((puntos[:, 0] - x0) / (x1 - x0) * H).long().clamp(0, H - 1)
+        cy = ((puntos[:, 1] - y0) / (y1 - y0) * W).long().clamp(0, W - 1)
+        return puntos[~m[fx, cy]]
 
     def forward(self, bev, nubes_completas, m):
         """`bev` (B,C,H,W) del encoder alimentado con la nube enmascarada."""

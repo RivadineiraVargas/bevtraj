@@ -14,6 +14,26 @@ from omegaconf import OmegaConf
 import os
 
 
+def _exige_frontera_de_epoca(ruta, lotes_por_epoca, acumulacion):
+    """TESIS (auditoria 09/10/2026): solo se reanuda desde el final de una epoca.
+
+    Un checkpoint a mitad de epoca hace que Lightning 2.1 repita parte de la epoca con el
+    orden de la epoca 0 y descoloque la acumulacion (ver el callback `fin-epoca`). Se
+    comprueba con el global_step guardado: debe ser multiplo de los pasos por epoca.
+    """
+    import math
+    ck = torch.load(ruta, map_location='cpu')
+    pasos_por_epoca = math.ceil(lotes_por_epoca / acumulacion)
+    paso = int(ck.get('global_step', -1))
+    del ck
+    if paso < 0 or paso % pasos_por_epoca != 0:
+        raise RuntimeError(
+            f"[train] {ruta} esta en el paso {paso}, que no es frontera de epoca "
+            f"({pasos_por_epoca} pasos por epoca). Reanudar a mitad de epoca no reproduce "
+            f"el entrenamiento: use fin-epoca.ckpt o empiece de cero.")
+    print(f"[train] checkpoint en frontera de epoca: paso {paso} = epoca {paso // pasos_por_epoca}")
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def train(cfg):
     set_seed(cfg.seed)
@@ -51,16 +71,23 @@ def train(cfg):
         )
         call_backs.append(checkpoint_callback)
 
-        # TESIS: red de seguridad por PASOS. El checkpoint de arriba solo guarda al
-        # cerrar una epoca; en esta maquina una corrida puede cortarse a mitad de
-        # epoca (degradacion de la GPU, corte de energia) y se pierde entera.
-        # `last.ckpt` se sobreescribe cada N pasos y es lo que busca el resume.
+        # TESIS: red de seguridad POR EPOCA (auditoria del 09/10/2026). Hasta entonces se
+        # guardaba `last.ckpt` cada 1.000 pasos y se reanudaba desde ahi, a mitad de epoca.
+        # Con Lightning 2.1 eso NO reproduce el entrenamiento (calibra_B, 03/10): reutiliza
+        # el iterador creado antes de fijar la epoca del muestreador (orden de la epoca 0),
+        # no salta los lotes ya vistos, descoloca la acumulacion de gradiente (un paso con
+        # un solo lote) y avanza el scheduler de mas. Ahora el unico estado reanudable se
+        # guarda al cerrar cada epoca (`fin-epoca.ckpt`, se sobreescribe); un corte pierde
+        # como mucho la epoca en curso, y la reanudacion rechaza cualquier checkpoint que
+        # no este en una frontera de epoca (_exige_frontera_de_epoca, abajo).
         call_backs.append(ModelCheckpoint(
             dirpath='ckpt/' + cfg.exp_name,
-            filename='step-{step}',
-            every_n_train_steps=cfg.method.get('ckpt_every_n_steps', 1000),
+            filename='fin-epoca',
+            every_n_epochs=1,
             save_top_k=1,
-            save_last=True,
+            save_last=False,
+            save_on_train_epoch_end=True,
+            enable_version_counter=False,
         ))
 
     # TESIS: EMA de los pesos (ver utils/ema.py). Solo si el config trae `ema_decay`;
@@ -120,13 +147,15 @@ def train(cfg):
             print(f"[train] AVISO: existe {previo} de una corrida anterior con este "
                   f"exp_name. NO se reanuda (auto_resume=false). Use un exp_name "
                   f"distinto por brazo y semilla, o borre ese directorio.")
+    if cfg.ckpt_path:
+        _exige_frontera_de_epoca(cfg.ckpt_path, len(train_loader),
+                                 cfg.method.get('accumulate_grad_batches', 1))
 
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.ckpt_path)
 
-    # TESIS: `last.ckpt` solo se escribe cada `ckpt_every_n_steps` pasos, asi que al
-    # terminar puede ir hasta 999 pasos por detras del modelo final (en el piloto,
-    # 12.288 pasos -> ultimo guardado en el 12.000). Para evaluar "el ultimo epoch" sin
-    # sesgo se guarda el estado FINAL de forma explicita.
+    # TESIS: el estado FINAL se guarda de forma explicita para evaluar "el ultimo epoch" sin
+    # depender de que callback guardo ultimo (hasta el 09/10, `last.ckpt` iba hasta 999
+    # pasos por detras; ahora `fin-epoca.ckpt` deberia coincidir, pero no se supone).
     if cfg.save_checkpoint:
         trainer.save_checkpoint(os.path.join('ckpt', cfg.exp_name, 'final.ckpt'))
         print(f"[train] modelo final guardado en ckpt/{cfg.exp_name}/final.ckpt")

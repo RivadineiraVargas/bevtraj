@@ -9,7 +9,7 @@ from unitraj.models.bevtraj.loss_utils import Criterion
 from unitraj.models.bevtraj.pre_encoder import BEVTrajPreEncoder
 from unitraj.models.bevtraj.scene_context_encoder import BEVTrajSceneContextEncoder
 from unitraj.models.bevtraj.decoder import BEVTrajDecoder
-from unitraj.models.bevtraj.custom_lr_sched import WarmupCosLR
+from unitraj.models.bevtraj.custom_lr_sched import WarmupCosLR, fija_lr_de_epoca
 from unitraj.models.base_model import BaseModel
 from unitraj.models.bevtraj.utility import batch_nms
 
@@ -251,9 +251,11 @@ class BEVTraj(BaseModel):
         # a la misma LR que un decoder que arranca aleatorio.
         cfg = dict(self.optimizer_cfg)
         base_lr = float(cfg.pop('lr'))
-        # TESIS: OJO. WarmupCosLR reescribe la LR de TODOS los grupos en cada paso
-        # como scheduler.lr * lr_scale, asi que el 'lr' que se pone aca solo vale
-        # para el primer paso y despues se ignora: manda `scheduler.lr`. Si las dos
+        # TESIS: OJO. WarmupCosLR reescribe la LR de TODOS los grupos en cada avance
+        # (POR EPOCA, el intervalo por defecto de Lightning; la auditoria del 09/10 corrigio
+        # el "en cada paso" de este comentario) como scheduler.lr * lr_scale, y su
+        # _initial_step la fija ya en la epoca 0 (lr/3), asi que el 'lr' que se pone aca
+        # nunca se usa: manda `scheduler.lr`. Si las dos
         # claves del config difieren, cambiar `optimizer.lr` no tiene ningun efecto
         # y no hay aviso. Como la tesis exige declarar la LR del encoder en cada
         # tabla de resultados, se verifica que coincidan.
@@ -266,7 +268,7 @@ class BEVTraj(BaseModel):
         enc_ids = {id(p_) for p_ in self.sensor_encoder.parameters()}
         enc_params = [p_ for p_ in self.parameters() if id(p_) in enc_ids and p_.requires_grad]
         rest_params = [p_ for p_ in self.parameters() if id(p_) not in enc_ids and p_.requires_grad]
-        # 'lr_scale' es lo que respeta WarmupCosLR en cada paso; sin el, el
+        # 'lr_scale' es lo que respeta WarmupCosLR en cada avance; sin el, el
         # scheduler reescribe la LR de todos los grupos con el mismo valor.
         groups = [{'params': rest_params, 'lr': base_lr, 'lr_scale': 1.0}]
         if enc_params:
@@ -278,8 +280,27 @@ class BEVTraj(BaseModel):
               f"({sum(p_.numel() for p_ in enc_params)/1e6:.2f} M)")
         optimizer = torch.optim.AdamW(groups, **cfg)
         scheduler = WarmupCosLR(optimizer, **self.scheduler_cfg)
-        
+
         return [optimizer], [scheduler]
+
+    def on_train_epoch_start(self):
+        # TESIS (auditoria 09/10/2026): la LR de cada epoca se fija aqui como funcion PURA
+        # de la epoca. Lightning 2.1 avanza el scheduler una vez de mas en la primera epoca
+        # tras reanudar (fit_loop.on_advance_end con restarting=True): calibra_B, reanudada
+        # en el paso 5000, entreno las epocas 3-14 con la LR de la epoca siguiente, sin
+        # ningun aviso. En una corrida sin cortes last_epoch ya vale la epoca y esto no
+        # cambia nada (tools/prueba_lr_por_epoca.py); tras una reanudacion lo corrige.
+        sch = self.lr_schedulers()
+        if sch is None:
+            return
+        e = int(self.current_epoch)
+        lrs, traia = fija_lr_de_epoca(sch, e)
+        if traia != e:
+            print(f"[lr] AVISO: el scheduler llego a la epoca {e} con last_epoch={traia}; se fijo a {e}")
+        # RegistraValidacion la escribe en validacion.jsonl: es la LR con que se entreno
+        # la epoca (al validar, el scheduler ya avanzo a la siguiente).
+        self._lr_epoca = lrs
+        print(f"[lr] epoca {e}: " + ", ".join(f"{l:.6e}" for l in lrs), flush=True)
     
     def training_step(self, batch, batch_idx):
         prediction, loss = self.forward(batch)
