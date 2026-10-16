@@ -132,7 +132,9 @@ def main():
     # entornos de train_val/val y la seleccion dejaria de ser limpia. Se excluye por
     # ESCENA, no por muestra, porque las muestras vecinas de una escena son casi iguales.
     if a.excluir_escenas_de:
-        import json
+        # TESIS (16/10/2026): aqui habia un `import json` local; desde que json se importa arriba, ese
+        # import hacia `json` LOCAL en todo main() y el codigo de F, que lo usa antes, moria con
+        # UnboundLocalError (lo cazo el humo de tools/piloto_f.sh).
         nombre2tok = {s['name']: s['token'] for s in json.load(open(
             f"{sc['data_root']}/v1.0-trainval/scene.json"))}
         fuera = set()
