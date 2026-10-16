@@ -6,6 +6,8 @@ etiqueta, y que son la contribución de la tesis:
 
   C_mae  reconstrucción de columnas BEV enmascaradas  (objetivo estático, estilo BEV-MAE)
   C_4d   predicción del presente a partir del pasado  (objetivo dinámico)
+  F      ocupación FUTURA a 0,5-3 s, con etiquetas precalculadas de los barridos futuros
+         (16/10/2026; docs/DISENO_C2_OBJETIVO_2026-10-03.md, estilo UnO)
 
 Las dos producen pesos para `encoders.lidar.*` y `decoder.*`, que son exactamente las
 claves que `BEVFusion.load_weights` espera. No producen `heads.map.*`, que en el brazo B
@@ -181,3 +183,49 @@ class Cabeza4D(nn.Module):
             return bev.new_zeros(()), {}
         total = torch.stack(perdidas).mean()
         return total, dict(c4d=float(total.detach()))
+
+
+# --- F: ocupación FUTURA (estilo UnO) -----------------------------------------
+
+class CabezaFutura(nn.Module):
+    """Predice, para h = 0,5 ... 3,0 s, si cada celda del BEV ACTUAL estará ocupada o libre.
+
+    TESIS (16/10/2026): objetivo F de docs/DISENO_C2_OBJETIVO_2026-10-03.md; piloto
+    pre-registrado en docs/PREREGISTRO_PILOTO_F_2026-10-16.md. Las etiquetas se precalculan
+    en la CPU (tesis_lidar/tools/precalcula_etiquetas_c2.py con etiquetas_futuro.ocupacion):
+    -1 desconocida; 0 libre (atravesada por un rayo del keyframe futuro por debajo de la banda
+    de obstáculos, o con retorno de suelo); 1 ocupada (retorno no-suelo del keyframe futuro),
+    todo en el marco del LiDAR ACTUAL y en la rejilla del BEV (filas = x, columnas = y).
+
+    Respaldo: UnO (Agro et al., CVPR 2024, arXiv 2406.08691) pronostica ocupación hasta 3 s
+    con pseudo-etiquetas de rayos LiDAR y equilibra consultas ocupadas y libres. Aquí igual:
+    en cada muestra y horizonte, la pérdida es la media de la BCE en las celdas ocupadas y la
+    media en las libres, con el mismo peso; las desconocidas no cuentan. Una muestra-horizonte
+    sin celdas ocupadas o sin libres no entra.
+
+    La cabeza es la MISMA de C_4d (_Cabeza, oculto 128) con 6 salidas: la comparación con C_4d
+    en la sonda es de objetivos, no de capacidad de la cabeza.
+    """
+
+    def __init__(self, c_in, n_horizontes=6):
+        super().__init__()
+        self.cabeza = _Cabeza(c_in, n_horizontes)
+        self.n = n_horizontes
+
+    def forward(self, bev, etiquetas):
+        """`bev` (B,C,H,W) del encoder; `etiquetas` (B,n,H,W) int8 en el mismo dispositivo."""
+        logit = self.cabeza(bev).float()
+        assert logit.shape == etiquetas.shape, f"{tuple(logit.shape)} != {tuple(etiquetas.shape)}"
+        bce = F.binary_cross_entropy_with_logits(logit, etiquetas.clamp(min=0).float(), reduction='none')
+        ocu, lib = (etiquetas == 1).float(), (etiquetas == 0).float()
+        n_o, n_l = ocu.sum((2, 3)), lib.sum((2, 3))
+        l_o = (bce * ocu).sum((2, 3)) / n_o.clamp(min=1)
+        l_l = (bce * lib).sum((2, 3)) / n_l.clamp(min=1)
+        valido = (n_o > 0) & (n_l > 0)
+        if not bool(valido.any()):
+            return bev.new_zeros(()), {}
+        por = 0.5 * (l_o + l_l)                     # (B, n)
+        total = por[valido].mean()
+        h = [float(por[:, k][valido[:, k]].mean().detach()) if bool(valido[:, k].any()) else float('nan')
+             for k in range(self.n)]
+        return total, dict(futuro=float(total.detach()), por_horizonte=h)

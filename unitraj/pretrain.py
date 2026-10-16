@@ -11,8 +11,16 @@ de predicción válido.
 Uso:
     python unitraj/pretrain.py --objetivo mae --config bevtraj_nusc_lidar_mini \
         --epocas 10 --batch 2 --salida pretraining_ckpt/c_mae.pth
+
+Objetivo `futuro` (F, 16/10/2026; docs/PREREGISTRO_PILOTO_F_2026-10-16.md): ocupación futura a
+0,5-3 s con etiquetas precalculadas por tesis_lidar/tools/precalcula_etiquetas_c2.py. El conjunto
+de muestras es el del índice de esas etiquetas (escenas de train_val y val excluidas por las
+listas OFICIALES, auditoría X27, y con 3 s de futuro); --muestras elige sobre él igual que el
+script de las etiquetas, y se comprueba que cada etiqueta es de la nube que se carga.
+    python unitraj/pretrain.py --objetivo futuro --etiquetas data/nuscenes/c2_etiquetas_v2 \
+        --muestras 3000 --salida pretraining_ckpt/f_piloto.pth
 """
-import argparse, os, sys, time
+import argparse, hashlib, json, os, sys, time
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +30,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from models.bevtraj.bevfusion import BEVFusion
-from models.bevtraj.pretrain_heads import CabezaMAE, Cabeza4D
+from models.bevtraj.pretrain_heads import CabezaMAE, Cabeza4D, CabezaFutura, rasteriza
 from datasets.nuscenes.nuscenes_dataset import NuScenesDataset
 from utils.utils import set_seed
 
@@ -36,6 +44,30 @@ def junta(lote):
                 muestras=[b['data_samples'] for b in lote])
 
 
+def md5_lista(idx):
+    """El mismo md5 que tesis_lidar/tools/precalcula_etiquetas_c2.py."""
+    return hashlib.md5(json.dumps([int(i) for i in idx]).encode()).hexdigest()
+
+
+def comprueba_orientacion(nubes, etq, rango, z_suelo=-1.4):
+    """TESIS (hábito 6: cada convención contra su medida). La etiqueta F a 0,5 s, ocupada, debe
+    coincidir con la ocupación no-suelo de la nube de ENTRADA rasterizada como el BEV (filas = x)
+    mucho más que traspuesta. Medido el 16/10 en 40 etiquetas de prueba (nube clave, no_suelo):
+    IoU 0,54 directa frente a 0,04 traspuesta. Aquí la entrada son 10 barridos y el suelo se
+    separa por altura (z < -1,4 m, como los rasgos crudos de la sonda)."""
+    H, W = etq.shape[-2:]
+    d, t = [], []
+    for n, e in zip(nubes, etq):
+        ocu = rasteriza(n[n[:, 2] > z_suelo], rango, (H, W))[0] > 0
+        lab = e[0] == 1
+        d.append(float((ocu & lab).sum()) / max(float((ocu | lab).sum()), 1.0))
+        t.append(float((ocu & lab.T).sum()) / max(float((ocu | lab.T).sum()), 1.0))
+    d, t = float(np.mean(d)), float(np.mean(t))
+    print(f"[C2] orientacion de F: IoU con la ocupacion de la entrada {d:.3f} directa, {t:.3f} traspuesta",
+          flush=True)
+    assert d >= 0.15 and d > 2 * t, "las etiquetas F no estan en la disposicion del BEV (filas = x)"
+
+
 def construye_modelo(cfg):
     mc = OmegaConf.to_container(cfg.MODEL.SENSOR_ENCODER, resolve=True)
     mc.pop('weight_path', None)          # C2 parte de init aleatoria, nunca del mapa
@@ -44,7 +76,7 @@ def construye_modelo(cfg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--objetivo', choices=['mae', '4d'], required=True)
+    ap.add_argument('--objetivo', choices=['mae', '4d', 'futuro'], required=True)
     ap.add_argument('--config', default='bevtraj_nusc_lidar_mini')
     ap.add_argument('--epocas', type=int, default=10)
     ap.add_argument('--batch', type=int, default=2)
@@ -65,8 +97,11 @@ def main():
     ap.add_argument('--semilla-datos', type=int, default=0)
     ap.add_argument('--excluir-escenas-de', nargs='*', default=[],
                     help='directorios ScenarioNet cuyas ESCENAS no deben verse al pre-entrenar')
+    ap.add_argument('--etiquetas', default='',
+                    help='(futuro) directorio de precalcula_etiquetas_c2.py; su indice.json da el conjunto')
     ap.add_argument('--salida', required=True)
     a = ap.parse_args()
+    a.md5_seleccion = None
 
     set_seed(a.semilla)
     raiz = Path(__file__).resolve().parent
@@ -81,6 +116,17 @@ def main():
     sc = OmegaConf.to_container(cfg.TRAIN_DATASET.SENSOR_DATASET, resolve=True)
     ds = NuScenesDataset(**sc)
     idx = list(range(len(ds)))
+    if a.objetivo == 'futuro':
+        # TESIS (16/10/2026): el conjunto es el del índice de las etiquetas, en su orden, para que
+        # --muestras elija exactamente lo que eligió precalcula_etiquetas_c2.py (se comprueba por md5)
+        assert a.etiquetas, '--objetivo futuro necesita --etiquetas'
+        indice = json.load(open(f"{a.etiquetas}/indice.json"))
+        idx = [int(i) for i in indice['muestras']]
+        assert md5_lista(idx) == indice['md5_muestras'], 'indice.json alterado'
+        assert max(idx) < len(ds), 'el indice no es de este dataset'
+        print(f"[C2] conjunto de las etiquetas: {len(idx)} muestras de "
+              f"{len({ds.get_data_info(i)['scene_token'] for i in idx})} escenas; "
+              f"exclusion: {indice['exclusion']}; md5 {indice['md5_muestras']}", flush=True)
     # TESIS: el pre-entrenamiento no debe ver nubes de las escenas con que luego se
     # selecciona o se evalua el modelo. Aunque no use etiquetas, veria exactamente los
     # entornos de train_val/val y la seleccion dejaria de ser limpia. Se excluye por
@@ -97,13 +143,24 @@ def main():
         antes = len(idx)
         idx = [i for i in idx if ds.get_data_info(i)['scene_token'] not in fuera]
         print(f"[C2] excluidas {len(fuera)} escenas: {antes} -> {len(idx)} muestras", flush=True)
+        # con 'futuro' el indice ya excluye las listas oficiales, que contienen a estas
+        assert a.objetivo != 'futuro' or len(idx) == antes, "el indice de F contiene escenas excluidas"
     if a.muestras:
         rng = np.random.RandomState(a.semilla_datos)
         idx = sorted(rng.choice(idx, size=min(a.muestras, len(idx)), replace=False).tolist())
         n_esc = len({ds.get_data_info(i)['scene_token'] for i in idx})
-        print(f"[C2] {len(idx)} muestras al azar de {n_esc} escenas distintas", flush=True)
+        a.md5_seleccion = md5_lista(idx)
+        print(f"[C2] {len(idx)} muestras al azar de {n_esc} escenas distintas; md5 {a.md5_seleccion}",
+              flush=True)
     if a.limite:
         idx = idx[:a.limite]
+    if a.objetivo == 'futuro':
+        # cada etiqueta debe existir y ser de la nube que el dataset carga con ese índice
+        for i in idx:
+            nube = Path(ds.get_data_info(i)['lidar_points']['lidar_path']).name
+            et = str(np.load(f"{a.etiquetas}/{i}.npz")['lidar'])
+            assert et == nube, f"la etiqueta {i} es de {et}, el dataset carga {nube}"
+        print(f"[C2] etiquetas F comprobadas: {len(idx)} de {len(idx)}, cada una de su nube", flush=True)
     sub = torch.utils.data.Subset(ds, idx)
     dl = DataLoader(sub, batch_size=a.batch, shuffle=True, num_workers=a.workers,
                     collate_fn=junta, drop_last=True)
@@ -112,6 +169,8 @@ def main():
     c_bev = sum(cfg.MODEL.SENSOR_ENCODER.decoder.neck.out_channels)
     if a.objetivo == 'mae':
         cabeza = CabezaMAE(c_bev, rango, ratio=a.ratio).to(dev)
+    elif a.objetivo == 'futuro':
+        cabeza = CabezaFutura(c_bev).to(dev)
     else:
         cabeza = Cabeza4D(c_bev, rango, corte=a.corte).to(dev)
 
@@ -127,11 +186,18 @@ def main():
     paso = 0
     for ep in range(a.epocas):
         modelo.train(); cabeza.train()
-        t0 = time.time(); acum = []; saltadas = 0
+        t0 = time.time(); acum = []; saltadas = 0; por_h = []
         for k, lote in enumerate(dl):
             nubes = [p.to(dev, non_blocking=True) for p in lote['puntos']]
 
-            if a.objetivo == '4d':
+            if a.objetivo == 'futuro':
+                etq = torch.from_numpy(np.stack([np.load(f"{a.etiquetas}/{int(m.sample_idx)}.npz")['F']
+                                                 for m in lote['muestras']])).to(dev)
+                if ep == 0 and k == 0:
+                    comprueba_orientacion(nubes, etq, rango)
+                entrada = nubes
+                muestras = lote['muestras']
+            elif a.objetivo == '4d':
                 # descartar las muestras sin señal temporal (keyframe duplicado)
                 pares = [Cabeza4D.separa(n, a.corte) for n in nubes
                          if Cabeza4D.tiene_senal(n)]
@@ -161,6 +227,10 @@ def main():
                     assert bev.shape[-2:] == (128, 128), \
                         f"BEV {tuple(bev.shape[-2:])}: ajustar el tamaño de la máscara"
                     perdida, reg = cabeza(bev, objetivo, m)
+                elif a.objetivo == 'futuro':
+                    perdida, reg = cabeza(bev, etq)
+                    if reg:
+                        por_h.append(reg['por_horizonte'])
                 else:
                     perdida, reg = cabeza(bev, objetivo)
 
@@ -181,6 +251,9 @@ def main():
         print(f"[C2] época {ep}: pérdida {np.mean(acum):.4f}  "
               f"({time.time()-t0:.0f} s, {len(acum)} lotes, {saltadas} muestras saltadas)",
               flush=True)
+        if por_h:
+            print(f"[C2] época {ep}: pérdida por horizonte (0,5 ... 3,0 s) "
+                  + " ".join(f"{x:.4f}" for x in np.nanmean(np.array(por_h), 0)), flush=True)
 
         guarda(modelo, a, ep, np.mean(acum) if acum else float('nan'))
     print("[C2] terminado")
@@ -213,7 +286,8 @@ def guarda(modelo, a, ep, perdida):
     torch.save(dict(state_dict=sd,
                     meta=dict(objetivo=a.objetivo, epoca=ep, perdida=float(perdida),
                               semilla=a.semilla, semilla_datos=a.semilla_datos, config=a.config,
-                              ratio=a.ratio, corte=a.corte)),
+                              ratio=a.ratio, corte=a.corte, etiquetas=a.etiquetas,
+                              md5_seleccion=a.md5_seleccion)),
                a.salida)
     print(f"[C2] guardadas {len(sd)} claves en {a.salida} "
           f"(encoders.lidar: {sum(1 for k in sd if k.startswith('encoders.lidar'))}, "
