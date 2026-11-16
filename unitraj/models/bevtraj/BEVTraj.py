@@ -61,6 +61,9 @@ class BEVTraj(BaseModel):
         # pre-entrenados a la LR del decoder. Aca se declara explicitamente.
         self.freeze_sensor_encoder = self.config.get('freeze_sensor_encoder', False)
         self.sensor_encoder_lr_mult = self.config.get('sensor_encoder_lr_mult', 1.0)
+        # TESIS (16/11/2026, E1 de PREREGISTRO_C2_TRAS_CONGELADO): BatchNorm del encoder FIJO aunque el encoder entrene
+        # (etapa de ajuste fino del LP-FT). Apagado por defecto: ningun config anterior cambia. Ver train().
+        self.encoder_bn_fijo = bool(self.config.get('encoder_bn_fijo', False))
         # TESIS: posicion del origen del LiDAR en el marco del vehiculo (x adelante,
         # y izquierda), en metros; None = comportamiento original. Ver prepare_decoder_input.
         off = self.config.get('lidar_origin_offset', None)
@@ -84,7 +87,7 @@ class BEVTraj(BaseModel):
         n_enc_train = sum(p_.numel() for p_ in self.sensor_encoder.parameters() if p_.requires_grad)
         print(f"BEVTraj model initialized. sensor_encoder: {n_enc/1e6:.2f} M params, "
               f"{n_enc_train/1e6:.2f} M entrenables (freeze={self.freeze_sensor_encoder}, "
-              f"lr_mult={self.sensor_encoder_lr_mult})")
+              f"lr_mult={self.sensor_encoder_lr_mult}, bn_fijo={self.encoder_bn_fijo})")
         
     def _barajar_bev(self, bev):
         """Sustituye el BEV de cada muestra por el de OTRA escena (brazo Z).
@@ -143,6 +146,13 @@ class BEVTraj(BaseModel):
         super().train(mode)
         if self.freeze_sensor_encoder:
             self.sensor_encoder.eval()
+        elif self.encoder_bn_fijo:
+            # TESIS (16/11/2026, E1): solo las capas de BatchNorm del encoder en eval. No normalizan con el lote ni
+            # actualizan running_mean/var (con el encoder en modo entrenamiento cambian en 5 pasadas: medido el
+            # 23/09); el resto del encoder entrena normal. Lightning llama a train() al empezar cada epoca.
+            for m in self.sensor_encoder.modules():
+                if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                    m.eval()
         return self
 
     def forward(self, batch):

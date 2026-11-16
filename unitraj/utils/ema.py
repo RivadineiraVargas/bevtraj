@@ -148,6 +148,10 @@ class RegistraValidacion(pl.Callback):
     def on_validation_end(self, trainer, pl_module):
         if trainer.sanity_checking:
             return
+        # TESIS (16/11/2026, E1 de PREREGISTRO_C2_TRAS_CONGELADO): la validacion previa de init_ckpt (trainer.validate
+        # antes de fit) no es una epoca de entrenamiento y no se escribe: verifica_corrida.py exige una linea por epoca
+        if trainer.state.fn != "fit":
+            return
         import json, os
         fila = {"epoca": int(trainer.current_epoch), "paso": int(trainer.global_step)}
         # TESIS (auditoria 09/10/2026): la LR con que se entreno la epoca (la fija

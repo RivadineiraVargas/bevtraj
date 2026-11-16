@@ -151,6 +151,19 @@ def train(cfg):
         _exige_frontera_de_epoca(cfg.ckpt_path, len(train_loader),
                                  cfg.method.get('accumulate_grad_batches', 1))
 
+    # TESIS (16/11/2026, tesis_lidar/docs/PREREGISTRO_C2_TRAS_CONGELADO_2026-11-16.md, E1): `init_ckpt` inicializa SOLO
+    # los pesos desde otra corrida y los valida contra ella antes de entrenar (utils/init_ckpt.py). Una reanudacion
+    # manda: su estado ya trae los pesos ajustados de ESTA corrida, y aplicar init_ckpt encima los devolveria al origen.
+    # Un config de E1 (lleva init_tol) sin init_ckpt entrenaria otro experimento sin aviso: se aborta.
+    if cfg.get('init_ckpt', None):
+        if cfg.ckpt_path:
+            print(f"[init] se reanuda desde {cfg.ckpt_path}: init_ckpt ({cfg.init_ckpt}) no se aplica")
+        else:
+            from utils.init_ckpt import inicializa, comprueba
+            inicializa(model, cfg.init_ckpt)
+            comprueba(trainer, model, val_loader, cfg.init_ckpt, float(cfg.method.get('init_tol', 5e-3)))
+    elif cfg.method.get('init_tol', None) is not None and not cfg.ckpt_path:
+        raise SystemExit("[init] ABORTO: este config (E1) exige +init_ckpt=ckpt/<corrida de origen>/final.ckpt")
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.ckpt_path)
 
     # TESIS: el estado FINAL se guarda de forma explicita para evaluar "el ultimo epoch" sin
