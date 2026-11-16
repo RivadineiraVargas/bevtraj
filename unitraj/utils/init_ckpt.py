@@ -27,6 +27,19 @@ def _md5(ruta):
     return h.hexdigest()
 
 
+def tolerancia(cfg_method):
+    """init_tol del config de E1, o None si el config no es de E1. Vive en MODEL, junto a encoder_bn_fijo (los escribe
+    genera_configs_tv.py --lpft con la sangria de MODEL).
+
+    TESIS (16/11/2026): train.py la buscaba en la RAIZ del metodo (cfg.method.get('init_tol')), donde no esta: el aborto
+    de un config de E1 lanzado sin init_ckpt no saltaba nunca, y la tolerancia salia del valor por defecto (5e-3 por
+    casualidad). Lo vio la revision previa al humo; la prueba en CPU solo miraba que la clave existiera en MODEL.
+    """
+    m = cfg_method.get("MODEL", None)
+    v = None if m is None else m.get("init_tol", None)
+    return None if v is None else float(v)
+
+
 def inicializa(model, ruta):
     """Carga estricta del state_dict de `ruta` (un checkpoint de Lightning) en `model`. Devuelve los tensores cargados."""
     ck = torch.load(ruta, map_location="cpu")

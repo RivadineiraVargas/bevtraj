@@ -39,6 +39,13 @@ def train(cfg):
     set_seed(cfg.seed)
     OmegaConf.set_struct(cfg, False)  # Open the struct
     cfg = OmegaConf.merge(cfg, cfg.method)
+    # TESIS (16/11/2026, E1 de PREREGISTRO_C2_TRAS_CONGELADO): un config de E1 (lleva init_tol) se lanza SIEMPRE con
+    # +init_ckpt, tambien al reanudar (lpft.sh lo pasa siempre; en una reanudacion no se aplica, ver abajo). Sin el,
+    # entrenaria el encoder del weight_path con un decoder aleatorio a la LR de ajuste fino: otro experimento, sin aviso.
+    from utils.init_ckpt import tolerancia
+    init_tol = tolerancia(cfg.method)
+    if init_tol is not None and not cfg.get('init_ckpt', None):
+        raise SystemExit("[init] ABORTO: este config (E1) exige +init_ckpt=ckpt/<corrida de origen>/final.ckpt")
 
     save_config_as_txt(cfg)
 
@@ -154,16 +161,14 @@ def train(cfg):
     # TESIS (16/11/2026, tesis_lidar/docs/PREREGISTRO_C2_TRAS_CONGELADO_2026-11-16.md, E1): `init_ckpt` inicializa SOLO
     # los pesos desde otra corrida y los valida contra ella antes de entrenar (utils/init_ckpt.py). Una reanudacion
     # manda: su estado ya trae los pesos ajustados de ESTA corrida, y aplicar init_ckpt encima los devolveria al origen.
-    # Un config de E1 (lleva init_tol) sin init_ckpt entrenaria otro experimento sin aviso: se aborta.
+    # (Un config de E1 sin init_ckpt ya abortó al empezar.)
     if cfg.get('init_ckpt', None):
         if cfg.ckpt_path:
             print(f"[init] se reanuda desde {cfg.ckpt_path}: init_ckpt ({cfg.init_ckpt}) no se aplica")
         else:
             from utils.init_ckpt import inicializa, comprueba
             inicializa(model, cfg.init_ckpt)
-            comprueba(trainer, model, val_loader, cfg.init_ckpt, float(cfg.method.get('init_tol', 5e-3)))
-    elif cfg.method.get('init_tol', None) is not None and not cfg.ckpt_path:
-        raise SystemExit("[init] ABORTO: este config (E1) exige +init_ckpt=ckpt/<corrida de origen>/final.ckpt")
+            comprueba(trainer, model, val_loader, cfg.init_ckpt, init_tol if init_tol is not None else 5e-3)
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.ckpt_path)
 
     # TESIS: el estado FINAL se guarda de forma explicita para evaluar "el ultimo epoch" sin
