@@ -1,7 +1,7 @@
 """TESIS: promedio exponencial (EMA) de los pesos entrenables.
 
-Por que: entre tres semillas el modelo final variaba hasta 0,50 en brier-minFDE10 (12 %),
-mas que cualquier diferencia entre brazos (confirmacion del 01-02/10/2026). Evaluar un
+Por que: entre semillas, el modelo final variaba mas que las diferencias entre brazos que se
+querian medir (medido en la tesis; las cifras estan en su registro, no en este repositorio). Evaluar un
 unico estado final, a lote 1, recoge el ruido de los ultimos pasos. El EMA de los pesos
 promedia ese ruido sin coste de computo (Morales-Brotons et al., TMLR 2024,
 arXiv 2411.18704: mejor generalizacion y predicciones mas consistentes).

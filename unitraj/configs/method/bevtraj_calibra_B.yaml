@@ -1,5 +1,5 @@
 # CALIBRACION. GENERADO por tesis_lidar/tools/genera_configs_tv.py -- no editar a mano.
-# Brazo B: supervisado con mapa HD, checkpoint SOLO LiDAR (mIoU de mapa 0,576 medido). nuScenes TRAINVAL. Instrumento v2.
+# Brazo B: supervisado con mapa HD, checkpoint SOLO LiDAR (verificado funcionalmente; cifras en el registro de la tesis). nuScenes TRAINVAL. Instrumento v2.
 # experiment_name (for wandb)
 
 exp_name: &exp_name 'calibra_B'
@@ -135,7 +135,7 @@ MODEL:
                 loss_type: focal
                 use_grid_transform: true
         dataset_name: *dataset_name
-        weight_path: pretraining_ckpt/lidar-only-seg.pth  # TESIS: brazo B, supervisado con mapa HD, checkpoint SOLO LiDAR (mIoU de mapa 0,576 medido)
+        weight_path: pretraining_ckpt/lidar-only-seg.pth  # TESIS: brazo B, supervisado con mapa HD, checkpoint SOLO LiDAR (verificado funcionalmente; cifras en el registro de la tesis)
     
     SCENE_CONTEXT_ENCODER:
         future_len: *future_len

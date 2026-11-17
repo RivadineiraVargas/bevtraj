@@ -220,10 +220,10 @@ class BEVFusion(Base3DDetector):
         # con una rama menos". En BEVFusion el backbone BEV (decoder.*) se entrena sobre
         # la salida del fuser; sin el, recibe las caracteristicas LiDAR crudas, que nunca
         # vio. Carga sin un solo desajuste de forma y el resultado esta roto: MEDIDO el
-        # 02/10/2026, la cabeza de mapa de bevfusion-seg.pth da mIoU 0,00003 en la
-        # variante solo LiDAR, frente a 0,576 de lidar-only-seg.pth, que es el checkpoint
-        # entrenado en esta arquitectura. El piloto y la confirmacion del brazo B se
-        # perdieron por esto (docs/DIAGNOSTICO_2026-10-02.md). Ahora es un error.
+        # 02/10/2026, la cabeza de mapa de bevfusion-seg.pth da un mIoU practicamente nulo
+        # en la variante solo LiDAR, a diferencia de lidar-only-seg.pth, que es el checkpoint
+        # entrenado en esta arquitectura. Dos experimentos se perdieron por esto (las cifras
+        # estan en el registro de la tesis, no en este repositorio). Ahora es un error.
         sobran_fuser = [k for k in inesperadas if k.startswith("fuser.")]
         if sobran_fuser and self.fuser is None:
             import os
@@ -235,7 +235,7 @@ class BEVFusion(Base3DDetector):
                 raise ValueError(
                     f"{weight_path} es un checkpoint de FUSION (trae {len(sobran_fuser)} claves de fuser) y "
                     f"este modelo no tiene fuser: su backbone BEV recibiria una entrada que nunca vio "
-                    f"(medido: mIoU de mapa 0,00003). Use el checkpoint de la misma modalidad "
+                    f"(medido: mIoU de mapa practicamente nulo). Use el checkpoint de la misma modalidad "
                     f"(p. ej. lidar-only-seg.pth). Para reproducir una corrida historica: "
                     f"permitir_ckpt_fusion_sin_fuser: true o BEVTRAJ_PERMITIR_FUSION_SIN_FUSER=1.")
         if desajuste:
