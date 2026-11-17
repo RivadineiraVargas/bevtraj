@@ -55,7 +55,7 @@ MODEL:
     init_tol: 5.0e-3   # TESIS: E1, la validacion previa debe reproducir la de la corrida de origen
     lidar_origin_offset: [0.9437, 0.0]   # TESIS: v2, el BEV esta centrado en el LiDAR
     aislar_rng_encoder: true   # TESIS: v2, mismo decoder inicial en todos los brazos
-    sensor_encoder_lr_mult: 1.0
+    sensor_encoder_lr_mult: 0.1   # TESIS: E1, enmienda 17/11: el encoder, 10 veces mas lento que el decoder
 
     PRE_ENCODER:
         k_attr: 8
@@ -259,7 +259,7 @@ MODEL:
     scheduler:
         lr: 1.0e-5
         min_lr: 5.0e-7  # TESIS: E1
-        warmup_epochs: 1   # TESIS: E1 (LR por epoca: 1e-5, 1e-5, 8,61e-6, 5,25e-6, 1,89e-6)
+        warmup_epochs: 2   # TESIS: E1, enmienda 17/11 (LR del decoder por epoca: 5e-6, 1e-5, 1e-5, 7,625e-6, 2,875e-6; el encoder x0,1)
         epochs: *max_epochs
 
 
