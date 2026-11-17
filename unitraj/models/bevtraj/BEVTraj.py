@@ -244,8 +244,8 @@ class BEVTraj(BaseModel):
         # nuScenes el sensor va 0,8911/0,9437/0,9858 m por delante (lidar2ego, y = 0);
         # el original tomaba la posicion del vehiculo como centro del BEV y todo lo que
         # lee o escribe en el BEV quedaba ~0,94 m desplazado hacia atras. MEDIDO el
-        # 02/10/2026 sobre 3.732 vehiculos: aciertos a 0,4 m del 40 % al 51 % al
-        # corregirlo. Solo se traslada: el giro de -90 grados del marco LiDAR ya lo
+        # 02/10/2026: los aciertos de posicion en el BEV mejoraron claramente al
+        # corregirlo (cifras en el registro de la tesis, no en este repositorio). Solo se traslada: el giro de -90 grados del marco LiDAR ya lo
         # compensa la convencion de muestreo (verificado en el mismo diagnostico).
         # Todas las transformaciones target<->BEV leen ego_x/ego_y de aqui.
         off = self.lidar_origin_offset

@@ -67,7 +67,7 @@ def train(cfg):
             monitor=cfg.method.get('ckpt_monitor', 'val/minADE5'),
             # TESIS: sin `auto_insert_metric_name=False`, Lightning mete el NOMBRE de la
             # metrica en el fichero, y como se llama `val/minADE5` la barra crea un
-            # directorio: queda `epoch=0-val/minADE5=3.90.ckpt`. Ademas los `=` rompen
+            # directorio: queda `epoch=0-val/minADE5=X.XX.ckpt`. Ademas los `=` rompen
             # la gramatica de overrides de Hydra, asi que ese checkpoint no se puede
             # pasar como `ckpt_path=...` para evaluarlo. Se deja un nombre plano.
             filename='ep{epoch:02d}-ade{val/minADE5:.2f}-brier{val/brier_minFDE10:.2f}',
