@@ -163,3 +163,16 @@ class RegistraValidacion(pl.Callback):
         os.makedirs(os.path.dirname(self.ruta), exist_ok=True)
         with open(self.ruta, "a") as f:
             f.write(json.dumps(fila) + "\n")
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        # TESIS (17/11/2026): las metricas de ENTRENAMIENTO de la epoca (train/loss y las de prediccion sobre los lotes de
+        # entrenamiento) en entrenamiento.jsonl, al lado de validacion.jsonl. No van en la fila de validacion: Lightning
+        # valida ANTES de cerrar la epoca de entrenamiento, y alli estarian las de la epoca anterior. Modo anadir, como
+        # validacion.jsonl: tras una reanudacion, por epoca vale la ultima linea.
+        import json, os
+        fila = {"epoca": int(trainer.current_epoch), "paso": int(trainer.global_step)}
+        fila.update({k: float(v) for k, v in trainer.callback_metrics.items() if k.startswith("train/")})
+        ruta = os.path.join(os.path.dirname(self.ruta), "entrenamiento.jsonl")
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        with open(ruta, "a") as f:
+            f.write(json.dumps(fila) + "\n")

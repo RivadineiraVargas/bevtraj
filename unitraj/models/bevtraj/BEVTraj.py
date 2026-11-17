@@ -315,9 +315,15 @@ class BEVTraj(BaseModel):
     def training_step(self, batch, batch_idx):
         prediction, loss = self.forward(batch)
         self.log_info(batch['traj_data'], batch_idx, prediction, status='train')
+        # TESIS (17/11/2026, pedido de la orientadora): la loss del predictor por epoca. El original la calculaba y no la
+        # registraba en ningun sitio. Solo se registra (detach): no cambia el entrenamiento.
+        self.log('train/loss', loss.detach(), on_step=False, on_epoch=True, sync_dist=True,
+                 batch_size=batch['traj_data']['batch_size'])
         return loss
 
     def validation_step(self, batch, batch_idx):
         prediction, loss = self.forward(batch)
         self.log_info(batch['traj_data'], batch_idx, prediction, status='val')
+        self.log('val/loss', loss.detach(), on_step=False, on_epoch=True, sync_dist=True,   # TESIS (17/11/2026)
+                 batch_size=batch['traj_data']['batch_size'])
         return loss
