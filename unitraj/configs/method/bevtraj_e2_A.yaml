@@ -1,4 +1,4 @@
-# E2 POCAS ETIQUETAS (25 % DE LAS ESCENAS). GENERADO por tesis_lidar/tools/genera_configs_tv.py -- no editar a mano.
+# E2 POCAS ETIQUETAS (UN CUARTO DE LAS ESCENAS). GENERADO por tesis_lidar/tools/genera_configs_tv.py -- no editar a mano.
 # Brazo A: init aleatoria (suelo). nuScenes TRAINVAL. Instrumento v2.
 # experiment_name (for wandb)
 
@@ -461,7 +461,7 @@ TRAIN_DATASET:
         load_num_workers: *load_num_workers
         data_path: *train_data_path
         max_data_num: *max_data_num
-        claves_permitidas: data/nuscenes/e2_claves_25.json   # TESIS: E2, solo las escenas elegidas (md5 % 4 == 0)
+        claves_permitidas: data/nuscenes/e2_claves_25.json   # TESIS: E2, solo las escenas elegidas (regla md5 modulo 4)
         past_len: *past_len
         future_len: *future_len
         max_num_agents: *max_num_agents
