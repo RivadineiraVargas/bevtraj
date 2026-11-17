@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import pickle
 import shutil
@@ -558,6 +560,24 @@ class BaseDataset(Dataset):
         alterar la mezcla que el DataLoader recibe.
         """
         claves = sorted(file_list.keys())
+        # TESIS (E2 de C2, pocas etiquetas, 17/11/2026): filtro de escenas. `claves_permitidas` apunta a un JSON con las
+        # claves de la cache que son de las escenas elegidas (regla md5 del nombre % 4 == 0; la lista y sus hashes se
+        # versionan en el registro de la tesis). Solo en entrenamiento: val y train_val no cambian. Se filtra ANTES del
+        # barajado determinista, asi que el subconjunto es el mismo para todos los brazos y semillas. Una lista que no
+        # cuadra con esta cache (claves que faltan, otro md5) es un error, no un aviso.
+        ruta = self.config.get('claves_permitidas', None)
+        if ruta and not self.is_validation:
+            lista = json.load(open(ruta))
+            permitidas = set(lista['claves'])
+            faltan = permitidas - set(claves)
+            if faltan:
+                raise ValueError(f"[e2] {len(faltan)} claves de {ruta} no estan en la cache: la lista no es de esta cache")
+            claves = [k for k in claves if k in permitidas]
+            md5 = hashlib.md5("\n".join(claves).encode("utf-8")).hexdigest()
+            if md5 != lista.get('md5_claves'):
+                raise ValueError(f"[e2] el md5 de las claves filtradas ({md5}) no es el de {ruta} ({lista.get('md5_claves')})")
+            print(f"[e2] filtro de escenas: {len(claves)} de {len(file_list)} muestras ({lista.get('n_escenas')} escenas), "
+                  f"md5 {md5}", flush=True)
         rng = np.random.RandomState(int(self.config.get('data_subset_seed', 0)))
         rng.shuffle(claves)
         if not self.is_validation:
