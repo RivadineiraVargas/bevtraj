@@ -24,10 +24,11 @@ class WarmupCosLR(_LRScheduler):
     def __init__(
         self, optimizer, min_lr, lr, warmup_epochs, epochs, last_epoch=-1, verbose=False
     ) -> None:
-        # TESIS: los configs publicados traen `min_lr: 1e-5`, que YAML 1.1 parsea
-        # como CADENA (exige 1.0e-5). La rama del coseno hace `self.lr - self.min_lr`
-        # y revienta con TypeError en la primera epoca posterior al warmup: con
-        # warmup_epochs=2 el entrenamiento muere en la epoca 2 de 10. Se fuerza a float.
+        # TESIS: conversion defensiva. Los configs publicados traen `min_lr: 1e-5`: con
+        # PyYAML a secas es una cadena, pero Hydra carga los configs con OmegaConf 2.3,
+        # que ya lo lee como float (comprobado en la imagen bevtraj:cu118, 19/11/2026).
+        # Este comentario decia (23/09) que el coseno fallaba con TypeError en la epoca 2:
+        # en este entorno no ocurre (auditoria independiente del 19/11/2026).
         self.min_lr = float(min_lr)
         self.lr = float(lr)
         self.epochs = int(epochs)
@@ -76,8 +77,10 @@ class WarmupCosLR(_LRScheduler):
                     / (self.epochs - self.warmup_epochs)
                 )
             )
-        # TESIS: antes se miraba "lr_scale" SOLO en param_groups[0]; con grupos
-        # separados (encoder pre-entrenado vs decoder aleatorio) el scheduler
-        # pisaba la LR del encoder con la del decoder en cada paso. Es el mismo
-        # error que invalido el exp. 18 del proyecto MOTF.
+        # TESIS: el original solo miraba si param_groups[0] tenia "lr_scale": si lo tenia,
+        # lo exigia en todos los grupos (KeyError si faltaba en alguno); si no, lo
+        # ignoraba en todos. Con `get`, cada grupo usa el suyo (1,0 por omision). Con los
+        # grupos que crea configure_optimizers, todos con lr_scale, el original ya daba LR
+        # distintas: es robustez. Este comentario decia (23/09) que pisaba la LR del
+        # encoder con la del decoder: era falso (auditoria independiente del 19/11/2026).
         return [lr * group.get("lr_scale", 1.0) for group in self.optimizer.param_groups]
