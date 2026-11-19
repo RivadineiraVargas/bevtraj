@@ -5,8 +5,8 @@ encoder congelado, `congela_C_s{s}`) y de su control de presupuesto (A ya entren
 Solo pesos: ni optimizador, ni programa de LR, ni epoca, ni EMA. La EMA arranca de estos pesos porque EMAPesos copia la
 sombra en on_train_start, despues de esta carga. Carga estricta: falta o sobra una clave y se aborta.
 
-Cargar sin desajustes no prueba que el modelo funcione: el brazo B del piloto cargaba entero y estaba roto (CLAUDE.md,
-02/10). Por eso, antes de entrenar, `comprueba` valida el modelo inicializado en el mismo subconjunto que su corrida de
+Cargar sin desajustes no prueba que el modelo funcione: el brazo B del piloto cargaba entero y estaba roto (registro de
+errores de la tesis, 02/10). Por eso, antes de entrenar, `comprueba` valida el modelo inicializado en el mismo subconjunto que su corrida de
 origen (las 1.000 muestras fijas de train_val, val_subset_num) y exige reproducir la ultima validacion de esa corrida,
 la de `validacion.jsonl` junto al checkpoint. Si no, aborta antes del primer paso.
 """
